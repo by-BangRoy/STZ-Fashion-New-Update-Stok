@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { Product, StockLog, RealtimeMessage, DeviceInfo, StockChangeType, AppSettings, DEFAULT_SETTINGS } from '../types/inventory.ts';
 import { INITIAL_PRODUCTS } from '../data/initialData.ts';
 import { playChime, isSoundEnabled, setSoundEnabled } from '../utils/audio.ts';
+import { parseDeviceUserAgent } from '../utils/deviceParser.ts';
 import { 
   db, 
   ensureFirebaseAuth, 
@@ -45,6 +46,7 @@ interface InventoryContextType {
     deviceId: string;
     deviceName: string;
     operatorName: string;
+    ip?: string;
   };
   soundOn: boolean;
   toggleSound: () => void;
@@ -93,7 +95,7 @@ const InventoryContext = createContext<InventoryContextType | null>(null);
 
 function getInitialDeviceProfile() {
   if (typeof window === 'undefined') {
-    return { deviceId: 'dev-srv', deviceName: 'Browser Web', operatorName: 'Staf' };
+    return { deviceId: 'dev-srv', deviceName: 'Browser Web', operatorName: 'Staf', ip: '127.0.0.1' };
   }
 
   let deviceId = localStorage.getItem('stz_device_id');
@@ -102,15 +104,14 @@ function getInitialDeviceProfile() {
     localStorage.setItem('stz_device_id', deviceId);
   }
 
+  const specs = parseDeviceUserAgent();
+
   let deviceName = localStorage.getItem('stz_device_name');
   if (!deviceName) {
-    // Determine friendly device name based on screen size or user agent
-    const isMobile = /Mobi|Android|iPhone/i.test(navigator.userAgent);
-    const isTablet = /iPad|Tablet/i.test(navigator.userAgent) || (window.innerWidth >= 600 && window.innerWidth <= 1024);
-    if (isTablet) {
+    if (specs.deviceCategory === 'Tablet') {
       deviceName = 'Tablet Kasir Toko';
-    } else if (isMobile) {
-      deviceName = 'Smartphone Kasir / Gudang';
+    } else if (specs.deviceCategory === 'Smartphone (HP)') {
+      deviceName = `${specs.deviceModel} (Kasir)`;
     } else {
       deviceName = 'Komputer Kasir Utama';
     }
@@ -123,7 +124,9 @@ function getInitialDeviceProfile() {
     localStorage.setItem('stz_operator_name', operatorName);
   }
 
-  return { deviceId, deviceName, operatorName };
+  const cachedIp = localStorage.getItem('stz_device_ip') || '127.0.0.1';
+
+  return { deviceId, deviceName, operatorName, ip: cachedIp };
 }
 
 async function safeParseJson<T = any>(res: Response | null | undefined): Promise<T | null> {
@@ -249,6 +252,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     // Broadcast updated device profile over WebSocket
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      const specs = parseDeviceUserAgent();
       socketRef.current.send(
         JSON.stringify({
           type: 'DEVICE_PRESENCE',
@@ -256,6 +260,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             deviceId: updated.deviceId,
             deviceName: updated.deviceName,
             operatorName: updated.operatorName,
+            userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+            screen: specs.screenResolution,
+            deviceType: specs.deviceCategory,
+            deviceModel: specs.deviceModel,
+            os: specs.os,
+            browser: specs.browser,
             timestamp: new Date().toISOString(),
           },
         })
@@ -417,11 +427,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       }
 
-      const devicesData = await safeParseJson<{ count?: number; devices?: DeviceInfo[] }>(resDevices);
+      const devicesData = await safeParseJson<{ count?: number; devices?: DeviceInfo[]; callerIp?: string }>(resDevices);
       if (devicesData && Array.isArray(devicesData.devices)) {
         setConnectedDevices(devicesData.devices);
         if (typeof devicesData.count === 'number') {
           setConnectedDevicesCount(devicesData.count);
+        }
+        if (devicesData.callerIp) {
+          const newIp = devicesData.callerIp;
+          setCurrentDevice(prev => ({ ...prev, ip: newIp }));
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('stz_device_ip', newIp);
+          }
         }
       }
 
@@ -462,7 +479,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setConnectionStatus('connected');
         reconnectAttemptsRef.current = 0;
 
-        // Send identity to server
+        // Send identity and device specs to server
+        const specs = parseDeviceUserAgent();
         ws.send(
           JSON.stringify({
             type: 'DEVICE_PRESENCE',
@@ -470,6 +488,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               deviceId: currentDeviceRef.current.deviceId,
               deviceName: currentDeviceRef.current.deviceName,
               operatorName: currentDeviceRef.current.operatorName,
+              userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+              screen: specs.screenResolution,
+              deviceType: specs.deviceCategory,
+              deviceModel: specs.deviceModel,
+              os: specs.os,
+              browser: specs.browser,
               timestamp: new Date().toISOString(),
             },
           })
@@ -525,6 +549,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     switch (msg.type) {
       case 'INIT': {
+        if (msg.payload?.clientInfo?.clientIp) {
+          const initIp = String(msg.payload.clientInfo.clientIp);
+          setCurrentDevice(prev => ({ ...prev, ip: initIp }));
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('stz_device_ip', initIp);
+          }
+        }
         if (msg.payload?.products && Array.isArray(msg.payload.products)) {
           setProducts(msg.payload.products);
           if (typeof window !== 'undefined') {

@@ -6,6 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { INITIAL_PRODUCTS } from './src/data/initialData.ts';
 import { Product, StockLog, RealtimeMessage, DeviceInfo, AppSettings } from './src/types/inventory.ts';
+import { parseDeviceUserAgent, formatIpAddress } from './src/utils/deviceParser.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -156,6 +157,21 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
+function extractClientIp(req: http.IncomingMessage): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  let ip = '';
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    ip = forwarded.split(',')[0].trim();
+  } else if (Array.isArray(forwarded) && forwarded.length > 0) {
+    ip = forwarded[0].trim();
+  } else if (typeof req.headers['x-real-ip'] === 'string' && req.headers['x-real-ip'].trim()) {
+    ip = req.headers['x-real-ip'].trim();
+  } else {
+    ip = req.socket.remoteAddress || '127.0.0.1';
+  }
+  return formatIpAddress(ip);
+}
+
 // Track connected devices
 interface ConnectedClient {
   ws: WebSocket;
@@ -165,6 +181,11 @@ interface ConnectedClient {
   ip: string;
   connectedAt: string;
   userAgent?: string;
+  deviceType?: string;
+  deviceModel?: string;
+  os?: string;
+  browser?: string;
+  screen?: string;
 }
 
 const connectedClients = new Map<WebSocket, ConnectedClient>();
@@ -195,6 +216,11 @@ function broadcastPresence() {
       lastSeen: new Date().toISOString(),
       userAgent: c.userAgent,
       connectedAt: c.connectedAt,
+      deviceType: c.deviceType,
+      deviceModel: c.deviceModel,
+      os: c.os,
+      browser: c.browser,
+      screen: c.screen,
     });
   }
   const devices: DeviceInfo[] = Array.from(uniqueMap.values());
@@ -286,21 +312,34 @@ app.get('/api/logs', (req, res) => {
 });
 
 app.get('/api/devices', (req, res) => {
-  const uniqueMap = new Map<string, any>();
+  const callerIp = extractClientIp(req);
+  const uniqueMap = new Map<string, DeviceInfo>();
   for (const c of connectedClients.values()) {
     uniqueMap.set(c.deviceId, {
       deviceId: c.deviceId,
       deviceName: c.deviceName,
       operatorName: c.operatorName,
       ip: c.ip,
+      lastSeen: new Date().toISOString(),
       connectedAt: c.connectedAt,
+      userAgent: c.userAgent,
+      deviceType: c.deviceType,
+      deviceModel: c.deviceModel,
+      os: c.os,
+      browser: c.browser,
+      screen: c.screen,
     });
   }
   const devices = Array.from(uniqueMap.values());
   res.json({
     count: devices.length,
     devices,
+    callerIp,
   });
+});
+
+app.get('/api/my-ip', (req, res) => {
+  res.json({ ip: extractClientIp(req) });
 });
 
 // Adjust stock of a variant
@@ -893,15 +932,23 @@ wss.on('connection', (ws: WebSocket, req) => {
     extWs.isAlive = true;
   });
 
-  const ip = req.socket.remoteAddress || '127.0.0.1';
+  const ip = extractClientIp(req);
+  const rawUa = (req.headers['user-agent'] as string) || '';
+  const parsedUa = parseDeviceUserAgent(rawUa);
+
   const defaultClient: ConnectedClient = {
     ws,
     deviceId: `dev-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-    deviceName: 'Perangkat Browser',
+    deviceName: parsedUa.deviceModel || 'Perangkat Kasir',
     operatorName: 'Staf',
     ip,
     connectedAt: new Date().toISOString(),
-    userAgent: req.headers['user-agent'] || 'Unknown Device',
+    userAgent: rawUa,
+    deviceType: parsedUa.deviceCategory,
+    deviceModel: parsedUa.deviceModel,
+    os: parsedUa.os,
+    browser: parsedUa.browser,
+    screen: parsedUa.screenResolution,
   };
 
   connectedClients.set(ws, defaultClient);
@@ -915,6 +962,7 @@ wss.on('connection', (ws: WebSocket, req) => {
       settings: appSettings,
       clientInfo: {
         assignedDeviceId: defaultClient.deviceId,
+        clientIp: defaultClient.ip,
         serverTime: new Date().toISOString(),
         totalUnits: products.reduce((acc, p) => acc + p.totalStock, 0),
       },
@@ -932,12 +980,26 @@ wss.on('connection', (ws: WebSocket, req) => {
       const msg: RealtimeMessage = JSON.parse(data.toString());
 
       if (msg.type === 'DEVICE_PRESENCE' && msg.meta) {
-        // Client updating its identity (e.g. user set deviceName to "Tablet Kasir 1")
+        // Client updating its identity or providing detailed browser specs
         const current = connectedClients.get(ws);
         if (current) {
-          current.deviceId = msg.meta.deviceId || current.deviceId;
-          current.deviceName = msg.meta.deviceName || current.deviceName;
-          current.operatorName = msg.meta.operatorName || current.operatorName;
+          const m = msg.meta as any;
+          current.deviceId = m.deviceId || current.deviceId;
+          current.deviceName = m.deviceName || current.deviceName;
+          current.operatorName = m.operatorName || current.operatorName;
+          if (m.screen) current.screen = m.screen;
+          if (m.deviceType) current.deviceType = m.deviceType;
+          if (m.deviceModel) current.deviceModel = m.deviceModel;
+          if (m.os) current.os = m.os;
+          if (m.browser) current.browser = m.browser;
+          if (m.userAgent) {
+            current.userAgent = m.userAgent;
+            const updatedUa = parseDeviceUserAgent(m.userAgent);
+            current.deviceType = current.deviceType || updatedUa.deviceCategory;
+            current.deviceModel = current.deviceModel || updatedUa.deviceModel;
+            current.os = current.os || updatedUa.os;
+            current.browser = current.browser || updatedUa.browser;
+          }
           connectedClients.set(ws, current);
           broadcastPresence();
         }

@@ -28,9 +28,13 @@ import {
   Eye,
   EyeOff,
   Zap,
-  Link2
+  Link2,
+  Wifi,
+  Monitor,
+  Cpu
 } from 'lucide-react';
 import { DeviceInfo } from '../types/inventory.ts';
+import { parseDeviceUserAgent, formatIpAddress } from '../utils/deviceParser.ts';
 
 interface DeviceManagerModalProps {
   isOpen: boolean;
@@ -60,6 +64,8 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
   const [showUrl, setShowUrl] = useState(false);
   const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
   const [localDevices, setLocalDevices] = useState<DeviceInfo[]>([]);
+  const [copiedIp, setCopiedIp] = useState<string | null>(null);
+  const [lastUpdatedTime, setLastUpdatedTime] = useState<string>('');
 
   // Keep device name and operator name in sync with current device profile
   useEffect(() => {
@@ -67,21 +73,36 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
     setOperatorName(currentDevice.operatorName);
   }, [currentDevice]);
 
-  // Lock body scroll when modal is open
+  // Synchronize local view whenever WebSocket brings new connected devices
+  useEffect(() => {
+    if (connectedDevices && connectedDevices.length > 0) {
+      setLocalDevices(connectedDevices);
+      setLastUpdatedTime(new Date().toLocaleTimeString('id-ID'));
+    }
+  }, [connectedDevices]);
+
+  // Lock body scroll & poll real-time updates while modal is open
   useEffect(() => {
     if (isOpen) {
       if (initialTab) setActiveTab(initialTab);
       const originalStyle = window.getComputedStyle(document.body).overflow;
       document.body.style.overflow = 'hidden';
       fetchDevicesList();
+
+      // Real-time automatic polling every 3.5 seconds while open
+      const interval = setInterval(() => {
+        fetchDevicesList(true);
+      }, 3500);
+
       return () => {
         document.body.style.overflow = originalStyle;
+        clearInterval(interval);
       };
     }
   }, [isOpen, initialTab]);
 
-  const fetchDevicesList = async () => {
-    setIsRefreshingDevices(true);
+  const fetchDevicesList = async (isBackground = false) => {
+    if (!isBackground) setIsRefreshingDevices(true);
     try {
       const res = await fetch('/api/devices');
       const contentType = res.headers.get('content-type') || '';
@@ -91,11 +112,36 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
           setLocalDevices(data.devices);
         }
       }
+      setLastUpdatedTime(new Date().toLocaleTimeString('id-ID'));
     } catch (e) {
       console.warn('Failed to fetch devices list:', e);
     } finally {
-      setTimeout(() => setIsRefreshingDevices(false), 400);
+      if (!isBackground) {
+        setTimeout(() => setIsRefreshingDevices(false), 300);
+      }
     }
+  };
+
+  const handleCopyIp = (ipToCopy: string) => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(ipToCopy);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = ipToCopy;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+    } catch (err) {
+      console.error('Failed to copy IP:', err);
+    }
+    setCopiedIp(ipToCopy);
+    setTimeout(() => setCopiedIp(null), 2000);
   };
 
   // Determine URLs for multi-device access
@@ -232,31 +278,40 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
 
   // Helper to determine device icon and badge
   const getDeviceVisuals = (device: DeviceInfo) => {
-    const raw = `${device.deviceName} ${device.userAgent || ''}`.toLowerCase();
+    const raw = `${device.deviceType || ''} ${device.deviceName || ''} ${device.deviceModel || ''} ${device.userAgent || ''}`.toLowerCase();
     if (/tablet|ipad/.test(raw)) {
       return {
         icon: <Tablet className="w-5 h-5 text-indigo-600" />,
         typeLabel: 'Tablet Kasir / Etalase',
+        badge: 'Tablet',
         colorBg: 'bg-indigo-50 border-indigo-200 text-indigo-700'
       };
     }
-    if (/mobi|phone|android|iphone/.test(raw)) {
+    if (/mobi|phone|android|iphone|smartphone/.test(raw)) {
       return {
         icon: <Smartphone className="w-5 h-5 text-emerald-600" />,
         typeLabel: 'Smartphone / HP Kasir',
+        badge: 'HP Kasir',
         colorBg: 'bg-emerald-50 border-emerald-200 text-emerald-700'
       };
     }
     return {
       icon: <Laptop className="w-5 h-5 text-blue-600" />,
       typeLabel: 'Komputer / Laptop Toko',
+      badge: 'PC / Laptop',
       colorBg: 'bg-blue-50 border-blue-200 text-blue-700'
     };
   };
 
-  // Combine localDevices and connectedDevices, ensuring current device is always shown
+  // Combine localDevices and connectedDevices, ensuring current device is always shown with rich metadata
+  const currentSpecs = parseDeviceUserAgent();
   const rawList = localDevices.length > 0 ? localDevices : connectedDevices;
   const mergedMap = new Map<string, DeviceInfo>();
+
+  const currentDeviceFromList = rawList.find(d => d.deviceId === currentDevice.deviceId);
+  const resolvedCurrentIp = currentDevice.ip && currentDevice.ip !== '127.0.0.1'
+    ? currentDevice.ip
+    : (currentDeviceFromList?.ip || '127.0.0.1 (Perangkat Ini)');
 
   // Ensure current device is present
   mergedMap.set(currentDevice.deviceId, {
@@ -264,12 +319,31 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
     deviceName: currentDevice.deviceName,
     operatorName: currentDevice.operatorName,
     lastSeen: new Date().toISOString(),
-    ip: '127.0.0.1 (Perangkat Ini)'
+    ip: resolvedCurrentIp,
+    connectedAt: currentDeviceFromList?.connectedAt || new Date().toISOString(),
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+    deviceType: currentSpecs.deviceCategory,
+    deviceModel: currentSpecs.deviceModel,
+    os: currentSpecs.os,
+    browser: currentSpecs.browser,
+    screen: currentSpecs.screenResolution,
+    isCurrent: true,
   });
 
   // Add all other devices
   for (const d of rawList) {
-    mergedMap.set(d.deviceId, d);
+    const isThis = d.deviceId === currentDevice.deviceId;
+    const parsed = parseDeviceUserAgent(d.userAgent);
+    mergedMap.set(d.deviceId, {
+      ...d,
+      ip: formatIpAddress(d.ip || (isThis ? resolvedCurrentIp : 'Jaringan Lokal')),
+      deviceType: d.deviceType || parsed.deviceCategory,
+      deviceModel: d.deviceModel || parsed.deviceModel,
+      os: d.os || parsed.os,
+      browser: d.browser || parsed.browser,
+      screen: d.screen || parsed.screenResolution,
+      isCurrent: isThis,
+    });
   }
 
   const allDisplayDevices = Array.from(mergedMap.values()).sort((a, b) => {
@@ -389,108 +463,193 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  Latensi siaran otomatis &lt;50ms. Setiap ada barang keluar atau masuk langsung diperbarui.
+                  Setiap ada mutasi barang keluar atau masuk langsung diperbarui dan disiarkan ke seluruh perangkat.
                 </p>
               </div>
             </div>
 
             <button
-              onClick={fetchDevicesList}
+              onClick={() => fetchDevicesList(false)}
               disabled={isRefreshingDevices}
-              className="px-3 py-1.5 bg-white hover:bg-amber-50 border border-yellow-300 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs shrink-0 self-start sm:self-center disabled:opacity-50 active:scale-95"
+              className="px-3 py-1.5 bg-white hover:bg-amber-50 border border-yellow-300 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs shrink-0 self-start sm:self-center disabled:opacity-50 active:scale-95 cursor-pointer"
               title="Segarkan daftar perangkat online"
             >
               <RefreshCw className={`w-3.5 h-3.5 text-amber-600 ${isRefreshingDevices ? 'animate-spin' : ''}`} />
-              <span>{isRefreshingDevices ? 'Memuat...' : 'Segarkan Daftar'}</span>
+              <span>{isRefreshingDevices ? 'Menyinkronkan...' : 'Segarkan Data'}</span>
             </button>
           </div>
 
-          {/* TAB 1: DAFTAR PERANGKAT ONLINE */}
+          {/* TAB 1: DAFTAR PERANGKAT ONLINE (INFORMASI DETAIL IP & PERANGKAT) */}
           {activeTab === 'devices' && (
             <div className="space-y-3 animate-in fade-in duration-150">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
                     <Users className="w-4 h-4 text-amber-600" />
                     <span>Daftar Perangkat Terhubung ({allDisplayDevices.length})</span>
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Perangkat yang saat ini sedang membuka aplikasi stok dan aktif saling sinkronisasi.
+                    Informasi detail alamat IP, tipe perangkat, sistem operasi, dan browser yang sedang aktif tersinkronisasi.
                   </p>
                 </div>
+                {lastUpdatedTime && (
+                  <div className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-300 px-2.5 py-1 rounded-xl font-bold flex items-center gap-1.5 self-start sm:self-auto shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Update Real-Time: {lastUpdatedTime} WIB</span>
+                  </div>
+                )}
               </div>
 
-              {/* Device Cards List */}
-              <div className="space-y-2.5">
+              {/* Device Cards List with Detailed IP & Device Specs */}
+              <div className="space-y-3">
                 {allDisplayDevices.map((dev, idx) => {
                   const isCurrent = dev.deviceId === currentDevice.deviceId;
                   const visuals = getDeviceVisuals(dev);
+                  const isCopied = copiedIp === dev.ip;
+
                   return (
                     <div 
                       key={dev.deviceId || idx}
-                      className={`p-3.5 sm:p-4 rounded-2xl border transition-all ${
+                      className={`p-4 sm:p-5 rounded-2xl border transition-all ${
                         isCurrent
-                          ? 'bg-amber-50/50 border-amber-300 ring-1 ring-amber-300 shadow-xs'
-                          : 'bg-white border-yellow-200/90 hover:border-yellow-300 shadow-xs'
+                          ? 'bg-gradient-to-br from-amber-50/70 via-yellow-50/40 to-white border-amber-300 ring-2 ring-amber-300/70 shadow-sm'
+                          : 'bg-white border-yellow-200/90 hover:border-amber-300 shadow-xs'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-3">
+                      {/* Top Header: Device Name, Badge, Live Status */}
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 border ${visuals.colorBg}`}>
+                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border ${visuals.colorBg} shadow-2xs`}>
                             {visuals.icon}
                           </div>
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                              <span className="text-sm font-bold text-slate-900 truncate">
-                                {dev.deviceName || 'Perangkat Browser'}
+                              <span className="text-sm sm:text-base font-extrabold text-slate-900 truncate">
+                                {dev.deviceName || 'Perangkat Kasir'}
                               </span>
                               {isCurrent ? (
-                                <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-slate-900 text-amber-300 shadow-xs">
+                                <span className="px-2.5 py-0.5 rounded-md text-[10px] font-black bg-slate-900 text-amber-300 shadow-2xs">
                                   Perangkat Ini
                                 </span>
                               ) : (
-                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                  Online
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                                  Online Real-Time
                                 </span>
                               )}
+                              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${visuals.colorBg}`}>
+                                {visuals.badge}
+                              </span>
                             </div>
                             
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-slate-600">
-                              <span className="flex items-center gap-1 font-medium text-slate-700">
+                              <span className="flex items-center gap-1 font-semibold text-slate-800">
                                 <User className="w-3.5 h-3.5 text-amber-600" />
-                                <span>Kasir/Staf: <strong className="text-slate-900">{dev.operatorName || 'Staf Toko'}</strong></span>
+                                <span>Kasir / Staf: <strong className="text-slate-950 font-bold">{dev.operatorName || 'Staf Toko'}</strong></span>
                               </span>
                               <span className="text-slate-300 hidden sm:inline">•</span>
-                              <span className="text-[11px] text-slate-500 hidden sm:inline">
-                                {visuals.typeLabel}
+                              <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">
+                                ID: <code className="font-mono text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">{dev.deviceId}</code>
                               </span>
                             </div>
                           </div>
                         </div>
 
                         <div className="text-right shrink-0">
-                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                            Aktif
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-300">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                            <span className="w-2 h-2 rounded-full bg-emerald-600 -ml-3.5" />
+                            <span>Terkoneksi Siaga</span>
                           </span>
                         </div>
                       </div>
 
-                      {/* Detail Footer for Device */}
-                      <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between text-[11px] text-slate-500 gap-2">
-                        <div className="flex items-center gap-3">
-                          <span className="flex items-center gap-1">
-                            <Globe className="w-3 h-3 text-slate-400" />
-                            <span>Koneksi: {dev.ip || 'Lokal Toko'}</span>
+                      {/* Detail Spesifikasi Perangkat & IP Address Grid */}
+                      <div className="mt-3.5 pt-3.5 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
+                        {/* 1. Alamat IP */}
+                        <div className="p-3 rounded-xl bg-amber-50/40 border border-amber-200/80 flex flex-col justify-between">
+                          <div className="text-[10px] font-black text-slate-600 flex items-center justify-between uppercase tracking-wider">
+                            <span className="flex items-center gap-1">
+                              <Globe className="w-3.5 h-3.5 text-amber-600" />
+                              <span>Alamat IP:</span>
+                            </span>
+                            {dev.ip && (
+                              <button
+                                type="button"
+                                onClick={() => handleCopyIp(dev.ip || '')}
+                                className="text-[10px] font-bold text-amber-700 hover:text-amber-950 flex items-center gap-0.5 cursor-pointer bg-white px-1.5 py-0.5 rounded border border-amber-200"
+                                title="Salin Alamat IP"
+                              >
+                                {isCopied ? (
+                                  <span className="text-emerald-700 font-black">✓ Tersalin</span>
+                                ) : (
+                                  <>
+                                    <Copy className="w-2.5 h-2.5" />
+                                    <span>Salin</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                          <div className="mt-1.5 font-mono font-black text-xs sm:text-sm text-slate-900 tracking-wide select-all break-all">
+                            {dev.ip || '127.0.0.1 (Lokal)'}
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+                            <Wifi className="w-3 h-3 text-emerald-600" />
+                            <span>Protokol: WebSocket Direct Sync</span>
+                          </div>
+                        </div>
+
+                        {/* 2. Perangkat & Model */}
+                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 flex flex-col justify-between">
+                          <div className="text-[10px] font-black text-slate-600 flex items-center gap-1 uppercase tracking-wider">
+                            <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Perangkat / Model:</span>
+                          </div>
+                          <div className="mt-1.5 font-bold text-xs text-slate-900 truncate" title={dev.deviceModel}>
+                            {dev.deviceModel || visuals.typeLabel}
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+                            <Monitor className="w-3 h-3 text-slate-400" />
+                            <span>Resolusi: {dev.screen || 'Standar Layar'}</span>
+                          </div>
+                        </div>
+
+                        {/* 3. Sistem Operasi & Browser */}
+                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 flex flex-col justify-between">
+                          <div className="text-[10px] font-black text-slate-600 flex items-center gap-1 uppercase tracking-wider">
+                            <Cpu className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Sistem Operasi &amp; Browser:</span>
+                          </div>
+                          <div className="mt-1.5 font-bold text-xs text-slate-900 truncate">
+                            {dev.os || 'Sistem Operasi Web'}
+                          </div>
+                          <div className="text-[10px] text-slate-600 font-medium truncate mt-1" title={dev.browser}>
+                            {dev.browser || 'Web Browser'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Footer: Waktu Konek & Shortcut Edit Nama */}
+                      <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between text-[11px] text-slate-500 gap-2">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-3 h-3 text-slate-400" />
+                          <span>
+                            Terkoneksi: {dev.connectedAt ? new Date(dev.connectedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Baru saja'} WIB
+                          </span>
+                          <span className="text-slate-300">•</span>
+                          <span className="text-emerald-700 font-bold flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            <span>Siaga Real-Time</span>
                           </span>
                         </div>
                         {isCurrent && (
                           <button
+                            type="button"
                             onClick={() => setActiveTab('identity')}
-                            className="text-amber-700 hover:text-amber-900 font-bold text-[11px] flex items-center gap-0.5 hover:underline"
+                            className="text-amber-800 hover:text-amber-950 font-extrabold text-[11px] flex items-center gap-0.5 hover:underline cursor-pointer"
                           >
-                            <span>Ubah Nama Perangkat</span>
+                            <span>Ganti Nama / Kasir Perangkat Ini</span>
                             <ChevronRight className="w-3 h-3" />
                           </button>
                         )}
@@ -512,8 +671,9 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setActiveTab('connect')}
-                  className="px-3.5 py-1.5 bg-slate-900 hover:bg-amber-500 hover:text-slate-950 text-white rounded-xl text-xs font-bold shrink-0 transition-colors shadow-xs active:scale-95"
+                  className="px-3.5 py-1.5 bg-slate-900 hover:bg-amber-500 hover:text-slate-950 text-white rounded-xl text-xs font-bold shrink-0 transition-colors shadow-xs active:scale-95 cursor-pointer"
                 >
                   Sambungkan HP
                 </button>
@@ -598,10 +758,6 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
 
                       {/* Fitur Unggulan Mini Chips */}
                       <div className="flex flex-wrap gap-1.5 pt-0.5 text-[11px]">
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-yellow-50/80 border border-amber-200/80 text-slate-800 font-bold">
-                          <Zap className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span>Sinkron Cepat (&lt;50ms)</span>
-                        </div>
                         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-yellow-50/80 border border-amber-200/80 text-slate-800 font-bold">
                           <Smartphone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                           <span>Android &amp; iPhone (Browser)</span>
@@ -774,7 +930,7 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
                         Otomatis Tersinkron
                       </div>
                       <p className="text-[11px] text-slate-600 mt-1.5 leading-relaxed">
-                        Saat ada stok keluar atau masuk di kasir, data di seluruh HP dan tablet terupdate seketika (&lt;50ms).
+                        Saat ada stok keluar atau masuk di kasir, data di seluruh HP dan tablet terupdate seketika secara otomatis.
                       </p>
                     </div>
                     <div className="mt-3 pt-2 border-t border-slate-100 text-[10px] text-emerald-700 font-extrabold">

@@ -81,6 +81,12 @@ export interface DeviceInfo {
   lastSeen: string;
   userAgent?: string;
   connectedAt?: string;
+  deviceType?: string;
+  deviceModel?: string;
+  os?: string;
+  browser?: string;
+  screen?: string;
+  isCurrent?: boolean;
 }
 
 export interface StoreProfile {
