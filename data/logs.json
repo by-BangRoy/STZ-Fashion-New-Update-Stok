@@ -1,0 +1,18 @@
+[
+  {
+    "id": "log-init-clean",
+    "timestamp": "2026-10-25T03:00:00.000Z",
+    "productId": "system",
+    "productName": "Sistem Inventaris Toko",
+    "variantId": "all",
+    "variantDescription": "Pengosongan Katalog",
+    "changeType": "adjustment",
+    "delta": 0,
+    "previousStock": 0,
+    "newStock": 0,
+    "reason": "Semua stok dan katalog barang berhasil dikosongkan. Sistem siap digunakan secara normal.",
+    "deviceId": "system-init",
+    "deviceName": "Sistem Utama",
+    "operatorName": "Admin"
+  }
+]

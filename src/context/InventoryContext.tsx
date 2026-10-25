@@ -1,0 +1,1625 @@
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { Product, StockLog, RealtimeMessage, DeviceInfo, StockChangeType, AppSettings, DEFAULT_SETTINGS } from '../types/inventory.ts';
+import { INITIAL_PRODUCTS } from '../data/initialData.ts';
+import { playChime, isSoundEnabled, setSoundEnabled } from '../utils/audio.ts';
+import { 
+  db, 
+  ensureFirebaseAuth, 
+  PRODUCTS_COLLECTION, 
+  LOGS_COLLECTION, 
+  SETTINGS_COLLECTION, 
+  SETTINGS_DOC_ID,
+  syncProductToFirestore,
+  deleteProductFromFirestore,
+  saveLogToFirestore,
+  saveSettingsToFirestore,
+  batchSyncProductsToFirestore,
+  clearAllProductsFromFirestore,
+  handleFirestoreError,
+  OperationType
+} from '../services/firebase.ts';
+import { collection, doc, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
+
+export interface RealtimeToast {
+  id: string;
+  title: string;
+  message: string;
+  type: 'sale' | 'restock' | 'warning' | 'danger' | 'info';
+  timestamp: string;
+  deviceName: string;
+  operatorName: string;
+  isRemote: boolean;
+  productName: string;
+  delta?: number;
+  newStock?: number;
+}
+
+interface InventoryContextType {
+  products: Product[];
+  stockLogs: StockLog[];
+  connectedDevicesCount: number;
+  connectedDevices: DeviceInfo[];
+  connectionStatus: 'connected' | 'connecting' | 'disconnected';
+  activeToasts: RealtimeToast[];
+  currentDevice: {
+    deviceId: string;
+    deviceName: string;
+    operatorName: string;
+  };
+  soundOn: boolean;
+  toggleSound: () => void;
+  updateDeviceProfile: (deviceName: string, operatorName: string) => void;
+  // Auth & PIN
+  isAuthenticated: boolean;
+  unlockWithPin: (pin: string) => Promise<{ success: boolean; error?: string }>;
+  lockApp: () => void;
+  // Settings & Store Profile
+  settings: AppSettings;
+  updateSettings: (newSettings: Partial<AppSettings>) => Promise<boolean>;
+  resetSettings: () => Promise<boolean>;
+  clearAllStock: (pin: string) => Promise<{ success: boolean; error?: string }>;
+  clearAllProducts: (pin: string) => Promise<{ success: boolean; error?: string }>;
+  clearTodayLogs: (pin: string) => Promise<{ success: boolean; error?: string; count?: number }>;
+  // Stock Mutations
+  adjustStock: (
+    productId: string,
+    variantId: string,
+    delta: number,
+    changeType?: StockChangeType,
+    reason?: string
+  ) => Promise<boolean>;
+  batchAdjustStock: (
+    items: Array<{
+      productId: string;
+      variantId: string;
+      delta: number;
+      changeType?: StockChangeType;
+      reason?: string;
+    }>
+  ) => Promise<boolean>;
+  createProduct: (productData: Partial<Product>) => Promise<boolean>;
+  updateProduct: (id: string, productData: Partial<Product>) => Promise<boolean>;
+  deleteProduct: (id: string) => Promise<boolean>;
+  dismissToast: (id: string) => void;
+  clearAllToasts: () => void;
+  addNotificationToast: (toast: Omit<RealtimeToast, 'id' | 'timestamp'>) => void;
+  resetDemoData: () => Promise<void>;
+  simulateRemoteChange: (scenario?: 'sale' | 'restock' | 'critical') => Promise<void>;
+  isRefreshing: boolean;
+  refreshData: (manual?: boolean) => Promise<void>;
+}
+
+const InventoryContext = createContext<InventoryContextType | null>(null);
+
+function getInitialDeviceProfile() {
+  if (typeof window === 'undefined') {
+    return { deviceId: 'dev-srv', deviceName: 'Browser Web', operatorName: 'Staf' };
+  }
+
+  let deviceId = localStorage.getItem('stz_device_id');
+  if (!deviceId) {
+    deviceId = `dev-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+    localStorage.setItem('stz_device_id', deviceId);
+  }
+
+  let deviceName = localStorage.getItem('stz_device_name');
+  if (!deviceName) {
+    // Determine friendly device name based on screen size or user agent
+    const isMobile = /Mobi|Android|iPhone/i.test(navigator.userAgent);
+    const isTablet = /iPad|Tablet/i.test(navigator.userAgent) || (window.innerWidth >= 600 && window.innerWidth <= 1024);
+    if (isTablet) {
+      deviceName = 'Tablet Kasir Toko';
+    } else if (isMobile) {
+      deviceName = 'Smartphone Kasir / Gudang';
+    } else {
+      deviceName = 'Komputer Kasir Utama';
+    }
+    localStorage.setItem('stz_device_name', deviceName);
+  }
+
+  let operatorName = localStorage.getItem('stz_operator_name');
+  if (!operatorName) {
+    operatorName = 'Kasir 1';
+    localStorage.setItem('stz_operator_name', operatorName);
+  }
+
+  return { deviceId, deviceName, operatorName };
+}
+
+async function safeParseJson<T = any>(res: Response | null | undefined): Promise<T | null> {
+  if (!res || !res.ok) return null;
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    return null;
+  }
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Initialize with local cache or empty catalog
+  const [products, setProducts] = useState<Product[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('stz_saved_products');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed.map((p: Product) => ({
+              ...p,
+              description: (/koleksi\s+busana/i.test(p.description || '') || /di+mport/i.test(p.description || '') || /stz\s+fashion/i.test(p.description || '')) ? '' : p.description,
+            }));
+          }
+        } catch (e) {}
+      }
+    }
+    return [];
+  });
+
+  const [stockLogs, setStockLogs] = useState<StockLog[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('stz_saved_logs');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) return parsed;
+        } catch (e) {}
+      }
+    }
+    return [];
+  });
+
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('stz_cached_settings');
+      if (saved) {
+        try {
+          return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+        } catch (e) {}
+      }
+    }
+    return DEFAULT_SETTINGS;
+  });
+
+  // Authentication State: remember authentication on device unless explicitly locked
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return sessionStorage.getItem('stz_unlocked') === 'true' || localStorage.getItem('stz_unlocked') === 'true';
+  });
+
+  const [connectedDevicesCount, setConnectedDevicesCount] = useState<number>(1);
+  const [connectedDevices, setConnectedDevices] = useState<DeviceInfo[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
+  const [activeToasts, setActiveToasts] = useState<RealtimeToast[]>([]);
+  const [currentDevice, setCurrentDevice] = useState(getInitialDeviceProfile);
+  const currentDeviceRef = useRef(currentDevice);
+  useEffect(() => {
+    currentDeviceRef.current = currentDevice;
+  }, [currentDevice]);
+
+  // Automatically persist products or remove cache when cleared
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        if (Array.isArray(products) && products.length > 0) {
+          localStorage.setItem('stz_saved_products', JSON.stringify(products));
+        } else {
+          localStorage.removeItem('stz_saved_products');
+        }
+      } catch (e) {
+        console.warn('Failed to update products in localStorage:', e);
+      }
+    }
+  }, [products]);
+
+  // Automatically persist logs
+  useEffect(() => {
+    if (typeof window !== 'undefined' && Array.isArray(stockLogs) && stockLogs.length > 0) {
+      try {
+        localStorage.setItem('stz_saved_logs', JSON.stringify(stockLogs.slice(0, 100)));
+      } catch (e) {}
+    }
+  }, [stockLogs]);
+
+  const [soundOn, setSoundOn] = useState(isSoundEnabled);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  const socketRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<any>(null);
+  const pingIntervalRef = useRef<any>(null);
+  const reconnectAttemptsRef = useRef<number>(0);
+
+  const toggleSound = () => {
+    const next = !soundOn;
+    setSoundOn(next);
+    setSoundEnabled(next);
+    if (next) {
+      playChime('sale');
+    }
+  };
+
+  const updateDeviceProfile = (deviceName: string, operatorName: string) => {
+    const updated = { ...currentDevice, deviceName, operatorName };
+    setCurrentDevice(updated);
+    localStorage.setItem('stz_device_name', deviceName);
+    localStorage.setItem('stz_operator_name', operatorName);
+
+    // Broadcast updated device profile over WebSocket
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          type: 'DEVICE_PRESENCE',
+          meta: {
+            deviceId: updated.deviceId,
+            deviceName: updated.deviceName,
+            operatorName: updated.operatorName,
+            timestamp: new Date().toISOString(),
+          },
+        })
+      );
+    }
+  };
+
+  // Auth & PIN functions
+  const unlockWithPin = async (inputPin: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/auth/verify-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: inputPin }),
+      }).catch(() => null);
+      const data = await safeParseJson<{ success: boolean; message?: string }>(res);
+      if (data && data.success) {
+        setIsAuthenticated(true);
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('stz_unlocked', 'true');
+          localStorage.setItem('stz_unlocked', 'true');
+        }
+        playChime('sale');
+        return { success: true };
+      } else if (data && !data.success) {
+        playChime('alert');
+        return { success: false, error: 'PIN yang Anda masukkan salah' };
+      }
+    } catch {
+      // Local fallback
+    }
+
+    // Local fallback
+    if (inputPin === settings.securityPin) {
+      setIsAuthenticated(true);
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('stz_unlocked', 'true');
+        localStorage.setItem('stz_unlocked', 'true');
+      }
+      playChime('sale');
+      return { success: true };
+    }
+    return { success: false, error: 'PIN tidak sesuai' };
+  };
+
+  const lockApp = () => {
+    setIsAuthenticated(false);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('stz_unlocked');
+      localStorage.removeItem('stz_unlocked');
+    }
+    playChime('warning');
+  };
+
+  const dismissToast = (id: string) => {
+    setActiveToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  const clearAllToasts = () => {
+    setActiveToasts([]);
+  };
+
+  const addNotificationToast = useCallback((toast: Omit<RealtimeToast, 'id' | 'timestamp'>) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newToast: RealtimeToast = {
+      ...toast,
+      id,
+      timestamp: new Date().toISOString(),
+    };
+
+    setActiveToasts(prev => [newToast, ...prev.slice(0, 4)]); // Keep max 5 visible toasts
+
+    // Auto dismiss after 6 seconds
+    setTimeout(() => {
+      setActiveToasts(prev => prev.filter(t => t.id !== id));
+    }, 6000);
+  }, []);
+
+  // Fetch full inventory, logs & settings via REST
+  const refreshData = useCallback(async (manual = false) => {
+    if (manual) setIsRefreshing(true);
+    try {
+      const [resInv, resLogs, resSettings, resDevices] = await Promise.all([
+        fetch('/api/inventory').catch(() => null),
+        fetch('/api/logs?limit=50').catch(() => null),
+        fetch('/api/settings').catch(() => null),
+        fetch('/api/devices').catch(() => null),
+      ]);
+
+      const invData = await safeParseJson<{ products: Product[] }>(resInv);
+      if (invData && Array.isArray(invData.products)) {
+        const incoming: Product[] = invData.products;
+        setProducts(prev => {
+          if (incoming.length === 0) {
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem('stz_saved_products');
+            }
+            return [];
+          }
+          const changed =
+            prev.length !== incoming.length ||
+            prev.some((p) => {
+              const inc = incoming.find((item) => item.id === p.id);
+              if (!inc) return true;
+              if (inc.name !== p.name) return true;
+              if (inc.category !== p.category) return true;
+              if (inc.sku !== p.sku) return true;
+              if (inc.location !== p.location) return true;
+              if (inc.description !== p.description) return true;
+              if (inc.imageUrl !== p.imageUrl) return true;
+              if (inc.totalStock !== p.totalStock) return true;
+              if (inc.updatedAt !== p.updatedAt) return true;
+              if (inc.variants.length !== p.variants.length) return true;
+              return inc.variants.some((iv, idx) => {
+                const pv = p.variants[idx];
+                if (!pv) return true;
+                return (
+                  iv.stock !== pv.stock ||
+                  iv.size !== pv.size ||
+                  iv.color !== pv.color ||
+                  iv.sku !== pv.sku ||
+                  iv.price !== pv.price ||
+                  iv.minStock !== pv.minStock
+                );
+              });
+            });
+          if (changed || prev.length === 0) {
+            const mapped = incoming.map((p) => ({
+              ...p,
+              variants: p.variants.map((v) => ({ ...v })),
+            }));
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem('stz_saved_products', JSON.stringify(mapped));
+              } catch (e) {}
+            }
+            return mapped;
+          }
+          return prev;
+        });
+      }
+
+      const logsData = await safeParseJson<{ logs: StockLog[] }>(resLogs);
+      if (logsData && Array.isArray(logsData.logs)) {
+        const logsList = logsData.logs;
+        setStockLogs(logsList);
+        if (typeof window !== 'undefined' && logsList.length > 0) {
+          try {
+            localStorage.setItem('stz_saved_logs', JSON.stringify(logsList));
+          } catch (e) {}
+        }
+      }
+
+      const settingsData = await safeParseJson<{ settings: AppSettings }>(resSettings);
+      if (settingsData && settingsData.settings) {
+        setSettings(settingsData.settings);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('stz_cached_settings', JSON.stringify(settingsData.settings));
+        }
+      }
+
+      const devicesData = await safeParseJson<{ count?: number; devices?: DeviceInfo[] }>(resDevices);
+      if (devicesData && Array.isArray(devicesData.devices)) {
+        setConnectedDevices(devicesData.devices);
+        if (typeof devicesData.count === 'number') {
+          setConnectedDevicesCount(devicesData.count);
+        }
+      }
+
+      if (manual) {
+        playChime('sale');
+      }
+    } catch (err) {
+      console.warn('Refresh data from server status:', err);
+    } finally {
+      if (manual) {
+        setTimeout(() => setIsRefreshing(false), 500);
+      }
+    }
+  }, []);
+
+  // WebSocket Connection Logic
+  const connectWebSocket = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    if (socketRef.current) {
+      socketRef.current.onclose = null;
+      socketRef.current.onerror = null;
+      socketRef.current.close();
+      socketRef.current = null;
+    }
+
+    setConnectionStatus('connecting');
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    const wsUrl = `${protocol}//${host}/ws`;
+
+    try {
+      const ws = new WebSocket(wsUrl);
+      socketRef.current = ws;
+
+      ws.onopen = () => {
+        setConnectionStatus('connected');
+        reconnectAttemptsRef.current = 0;
+
+        // Send identity to server
+        ws.send(
+          JSON.stringify({
+            type: 'DEVICE_PRESENCE',
+            meta: {
+              deviceId: currentDeviceRef.current.deviceId,
+              deviceName: currentDeviceRef.current.deviceName,
+              operatorName: currentDeviceRef.current.operatorName,
+              timestamp: new Date().toISOString(),
+            },
+          })
+        );
+
+        // Start ping heartbeat
+        if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'PING' }));
+          }
+        }, 20000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg: RealtimeMessage = JSON.parse(event.data);
+          handleRealtimeMessage(msg);
+        } catch (err) {
+          console.error('Error handling WebSocket message:', err);
+        }
+      };
+
+      ws.onclose = () => {
+        setConnectionStatus('disconnected');
+        if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+
+        // Auto-reconnect with exponential backoff (capped at 5s)
+        const delay = Math.min(1000 * Math.pow(1.5, reconnectAttemptsRef.current), 5000);
+        reconnectAttemptsRef.current += 1;
+        reconnectTimeoutRef.current = setTimeout(() => {
+          connectWebSocket();
+        }, delay);
+      };
+
+      ws.onerror = (err) => {
+        console.warn('WebSocket connection error:', err);
+        try {
+          ws.close();
+        } catch {}
+      };
+    } catch (err) {
+      console.error('Failed to construct WebSocket:', err);
+      setConnectionStatus('disconnected');
+    }
+  }, []);
+
+  // Handle all real-time event updates
+  const handleRealtimeMessage = useCallback((msg: RealtimeMessage) => {
+    const isRemote = Boolean(msg.meta && msg.meta.deviceId !== currentDeviceRef.current.deviceId);
+    const senderDevice = msg.meta?.deviceName || 'Perangkat Lain';
+    const senderOperator = msg.meta?.operatorName || 'Staf';
+
+    switch (msg.type) {
+      case 'INIT': {
+        if (msg.payload?.products && Array.isArray(msg.payload.products)) {
+          setProducts(msg.payload.products);
+          if (typeof window !== 'undefined') {
+            try {
+              if (msg.payload.products.length > 0) {
+                localStorage.setItem('stz_saved_products', JSON.stringify(msg.payload.products));
+              } else {
+                localStorage.removeItem('stz_saved_products');
+              }
+            } catch (e) {}
+          }
+        }
+        if (msg.payload?.logs && Array.isArray(msg.payload.logs) && msg.payload.logs.length > 0) {
+          setStockLogs(msg.payload.logs);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('stz_saved_logs', JSON.stringify(msg.payload.logs));
+            } catch (e) {}
+          }
+        }
+        if (msg.payload?.settings) {
+          setSettings(msg.payload.settings);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('stz_cached_settings', JSON.stringify(msg.payload.settings));
+          }
+        }
+        break;
+      }
+
+      case 'DEVICE_PRESENCE': {
+        if (msg.payload?.count !== undefined) {
+          setConnectedDevicesCount(msg.payload.count);
+        }
+        if (msg.payload?.devices) {
+          setConnectedDevices(msg.payload.devices);
+        }
+        break;
+      }
+
+      case 'SETTINGS_UPDATED': {
+        if (msg.payload?.settings) {
+          setSettings(msg.payload.settings);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('stz_cached_settings', JSON.stringify(msg.payload.settings));
+          }
+        }
+        playChime('adjustment');
+        addNotificationToast({
+          title: `⚙️ Pengaturan Diperbarui (${senderDevice})`,
+          message: `Profil butik & pengaturan sistem telah disinkronkan oleh ${senderOperator}.`,
+          type: 'info',
+          deviceName: senderDevice,
+          operatorName: senderOperator,
+          isRemote,
+          productName: 'Pengaturan Sistem',
+        });
+        break;
+      }
+
+      case 'ALL_STOCK_CLEARED': {
+        if (msg.payload?.products) {
+          setProducts(msg.payload.products);
+        }
+        if (msg.payload?.log) {
+          setStockLogs(prev => [msg.payload.log, ...prev]);
+        }
+        playChime('alert');
+        addNotificationToast({
+          title: `⛔ PERINGATAN: SEMUA STOK DIKOSONGKAN!`,
+          message: `Seluruh stok katalog diatur menjadi 0 pcs oleh ${senderDevice} (${senderOperator}).`,
+          type: 'danger',
+          deviceName: senderDevice,
+          operatorName: senderOperator,
+          isRemote,
+          productName: 'Semua Busana',
+        });
+        break;
+      }
+
+      case 'ALL_PRODUCTS_DELETED': {
+        setProducts([]);
+        if (msg.payload?.log) {
+          setStockLogs(prev => [msg.payload.log, ...prev]);
+        }
+        playChime('alert');
+        addNotificationToast({
+          title: `🗑️ SEMUA PRODUK TELAH DIHAPUS!`,
+          message: `Seluruh produk di katalog telah dihapus oleh ${senderDevice} (${senderOperator}).`,
+          type: 'danger',
+          deviceName: senderDevice,
+          operatorName: senderOperator,
+          isRemote,
+          productName: 'Semua Produk',
+        });
+        break;
+      }
+
+      case 'TODAY_LOGS_CLEARED': {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const todayDateStr = `${year}-${month}-${day}`;
+
+        setStockLogs(prev => prev.filter(log => {
+          try {
+            const d = new Date(log.timestamp);
+            const lYear = d.getFullYear();
+            const lMonth = String(d.getMonth() + 1).padStart(2, '0');
+            const lDay = String(d.getDate()).padStart(2, '0');
+            return `${lYear}-${lMonth}-${lDay}` !== todayDateStr;
+          } catch {
+            return true;
+          }
+        }));
+        playChime('adjustment');
+        addNotificationToast({
+          title: `🧹 Aktivitas Hari Ini Dihapus (${senderDevice})`,
+          message: `Riwayat perubahan stok hari ini telah dibersihkan oleh ${senderOperator}.`,
+          type: 'info',
+          deviceName: senderDevice,
+          operatorName: senderOperator,
+          isRemote,
+          productName: 'Riwayat Log Hari Ini',
+        });
+        break;
+      }
+
+      case 'STOCK_UPDATED': {
+        const { product, log, isLowStock, isOutOfStock } = msg.payload || {};
+        if (product) {
+          // Deep clone to guarantee immediate re-rendering in all table columns and card components
+          const clonedProduct: Product = {
+            ...product,
+            variants: product.variants.map((v: any) => ({ ...v })),
+          };
+          setProducts(prev => {
+            const index = prev.findIndex(p => p.id === product.id);
+            if (index === -1) return [clonedProduct, ...prev];
+            const next = [...prev];
+            next[index] = clonedProduct;
+            return next;
+          });
+        }
+        if (log) {
+          setStockLogs(prev => [log, ...prev.filter(l => l.id !== log.id).slice(0, 100)]);
+        }
+
+        const isAnyOut = Number(product?.totalStock) === 0 || product?.variants?.some((v: any) => Number(v.stock) <= 0) || Boolean(isOutOfStock);
+        const isAnyLow = (product?.variants?.some((v: any) => Number(v.stock) <= Number(v.minStock) && Number(v.stock) > 0) && !isAnyOut) || Boolean(isLowStock);
+
+        // Notification and sound
+        if (isAnyOut) {
+          playChime('alert');
+          addNotificationToast({
+            title: '⛔ PERINGATAN: STOK HABIS (0 PCS)!',
+            message: `${log?.productName || product?.name} (${log?.variantDescription || 'Stok 0'}) habis! Diperbarui oleh ${senderDevice} (${senderOperator}).`,
+            type: 'danger',
+            deviceName: senderDevice,
+            operatorName: senderOperator,
+            isRemote,
+            productName: log?.productName || product?.name || 'Barang',
+            delta: log?.delta,
+            newStock: 0,
+          });
+        } else if (isAnyLow) {
+          playChime('warning');
+          addNotificationToast({
+            title: '⚠️ PERINGATAN: STOK MENIPIS',
+            message: `${log?.productName || product?.name} (${log?.variantDescription || 'Varian'}) tersisa ${log?.newStock ?? 'sedikit'} pcs (di bawah batas minimum).`,
+            type: 'warning',
+            deviceName: senderDevice,
+            operatorName: senderOperator,
+            isRemote,
+            productName: log?.productName || product?.name || 'Barang',
+            delta: log?.delta,
+            newStock: log?.newStock,
+          });
+        } else if (log?.changeType === 'sale') {
+          playChime('sale');
+          addNotificationToast({
+            title: isRemote ? `🔔 Penjualan di ${senderDevice}` : '✓ Penjualan Dicatat',
+            message: `${log?.productName} (${log?.variantDescription}): terjual ${Math.abs(log?.delta || 1)} pcs. Sisa stok: ${log?.newStock} pcs.`,
+            type: 'sale',
+            deviceName: senderDevice,
+            operatorName: senderOperator,
+            isRemote,
+            productName: log?.productName || 'Barang',
+            delta: log?.delta,
+            newStock: log?.newStock,
+          });
+        } else if (log?.changeType === 'restock') {
+          playChime('restock');
+          addNotificationToast({
+            title: isRemote ? `📦 Restock Baru dari ${senderDevice}` : '✓ Restock Berhasil',
+            message: `${log?.productName} (${log?.variantDescription}): bertambah +${log?.delta} pcs. Total stok: ${log?.newStock} pcs.`,
+            type: 'restock',
+            deviceName: senderDevice,
+            operatorName: senderOperator,
+            isRemote,
+            productName: log?.productName || 'Barang',
+            delta: log?.delta,
+            newStock: log?.newStock,
+          });
+        } else if (log?.changeType === 'damage') {
+          playChime('warning');
+          addNotificationToast({
+            title: isRemote ? `⚠️ Barang Rusak dari ${senderDevice}` : '⚠️ Barang Rusak / Reject Dicatat',
+            message: `${log?.productName} (${log?.variantDescription}): -${Math.abs(log?.delta || 1)} pcs (${log?.reason || 'Cacat/Rusak'}). Sisa stok: ${log?.newStock} pcs.`,
+            type: 'danger',
+            deviceName: senderDevice,
+            operatorName: senderOperator,
+            isRemote,
+            productName: log?.productName || 'Barang',
+            delta: log?.delta,
+            newStock: log?.newStock,
+          });
+        } else {
+          playChime('adjustment');
+          addNotificationToast({
+            title: isRemote ? `🔄 Koreksi Stok dari ${senderDevice}` : '✓ Stok Diperbarui',
+            message: `${log?.productName} (${log?.variantDescription}): ${log?.reason || 'Penyesuaian stok'}. Sisa stok: ${log?.newStock} pcs.`,
+            type: 'info',
+            deviceName: senderDevice,
+            operatorName: senderOperator,
+            isRemote,
+            productName: log?.productName || 'Barang',
+            delta: log?.delta,
+            newStock: log?.newStock,
+          });
+        }
+        break;
+      }
+
+      case 'BATCH_RESTOCK': {
+        const { products: updatedProducts, logs: createdLogs } = msg.payload || {};
+        if (Array.isArray(updatedProducts)) {
+          setProducts(prev => {
+            const map = new Map(prev.map(p => [p.id, p]));
+            for (const p of updatedProducts) {
+              map.set(p.id, p);
+            }
+            return Array.from(map.values());
+          });
+        }
+        if (Array.isArray(createdLogs)) {
+          setStockLogs(prev => [...createdLogs, ...prev].slice(0, 100));
+        }
+
+        playChime('restock');
+        addNotificationToast({
+          title: `📦 Update Batch / Opname (${senderDevice})`,
+          message: `${updatedProducts?.length || 0} produk berhasil disinkronkan secara massal.`,
+          type: 'restock',
+          deviceName: senderDevice,
+          operatorName: senderOperator,
+          isRemote,
+          productName: 'Multi-Produk',
+        });
+        break;
+      }
+
+      case 'PRODUCT_CREATED': {
+        const { product, log } = msg.payload || {};
+        if (product) {
+          setProducts(prev => [product, ...prev.filter(p => p.id !== product.id)]);
+        }
+        if (log) {
+          setStockLogs(prev => [log, ...prev]);
+        }
+        playChime('restock');
+        addNotificationToast({
+          title: `✨ Produk Baru Ditambahkan (${senderDevice})`,
+          message: `"${product?.name}" dengan ${product?.variants?.length} varian berhasil masuk katalog.`,
+          type: 'info',
+          deviceName: senderDevice,
+          operatorName: senderOperator,
+          isRemote,
+          productName: product?.name || 'Produk Baru',
+        });
+        break;
+      }
+
+      case 'PRODUCT_UPDATED': {
+        const { product, log } = msg.payload || {};
+        if (product) {
+          const clonedProduct: Product = {
+            ...product,
+            variants: Array.isArray(product.variants) ? product.variants.map((v: any) => ({ ...v })) : [],
+          };
+          setProducts(prev => {
+            const next = prev.map(p => (p.id === clonedProduct.id ? clonedProduct : p));
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem('stz_saved_products', JSON.stringify(next));
+              } catch (e) {}
+            }
+            return next;
+          });
+        }
+        if (log) {
+          setStockLogs(prev => [log, ...prev.filter(l => l.id !== log.id)].slice(0, 100));
+        }
+        if (isRemote) {
+          playChime('adjustment');
+          addNotificationToast({
+            title: `🔄 Info Barang Diperbarui (${senderDevice})`,
+            message: `"${product?.name || 'Produk'}" telah diperbarui oleh ${senderOperator} (${senderDevice}).`,
+            type: 'info',
+            deviceName: senderDevice,
+            operatorName: senderOperator,
+            isRemote,
+            productName: product?.name || 'Produk',
+          });
+        }
+        break;
+      }
+
+      case 'PRODUCT_DELETED': {
+        const { productId, productName } = msg.payload || {};
+        if (productId) {
+          setProducts(prev => prev.filter(p => p.id !== productId));
+        }
+        addNotificationToast({
+          title: `🗑️ Produk Dihapus (${senderDevice})`,
+          message: `"${productName || 'Produk'}" telah dihapus dari katalog stok.`,
+          type: 'warning',
+          deviceName: senderDevice,
+          operatorName: senderOperator,
+          isRemote,
+          productName: productName || 'Produk Dihapus',
+        });
+        break;
+      }
+
+      case 'PONG':
+        // Heartbeat ACK
+        break;
+
+      default:
+        break;
+    }
+  }, [addNotificationToast]);
+
+  // Initial load, WebSocket connection & resilient multi-device sync
+  useEffect(() => {
+    refreshData();
+    connectWebSocket();
+
+    // BroadcastChannel for instant zero-latency cross-tab sync
+    let bc: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        bc = new BroadcastChannel('stz_inventory_channel');
+        bc.onmessage = (event) => {
+          const msg = event.data;
+          if (msg && msg.type) {
+            handleRealtimeMessage(msg);
+          }
+        };
+      } catch (e) {}
+    }
+
+    // Resilient fallback sync:
+    // When WebSocket is connected, updates arrive in real-time instantly (<10ms).
+    // If WebSocket is ever temporarily disconnected or reconnecting, poll every 3.5s as safety net.
+    // A gentle background sync every 25s maintains sanity without lag or battery drain on phones.
+    const fallbackPollInterval = setInterval(() => {
+      const isWsOpen = socketRef.current && socketRef.current.readyState === WebSocket.OPEN;
+      if (!isWsOpen) {
+        refreshData();
+      }
+    }, 3500);
+
+    const gentleSanitySync = setInterval(() => {
+      refreshData();
+    }, 25000);
+
+    // Auto-reconnect & resync immediately when user wakes up screen, unlocks phone, or refocuses tab
+    const handleWakeOrFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        refreshData();
+        if (
+          !socketRef.current ||
+          socketRef.current.readyState === WebSocket.CLOSED ||
+          socketRef.current.readyState === WebSocket.CLOSING
+        ) {
+          connectWebSocket();
+        } else if (socketRef.current.readyState === WebSocket.OPEN) {
+          try {
+            socketRef.current.send(JSON.stringify({ type: 'PING' }));
+          } catch {
+            connectWebSocket();
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleWakeOrFocus);
+    window.addEventListener('focus', handleWakeOrFocus);
+    window.addEventListener('online', handleWakeOrFocus);
+
+    // Real-time Firestore Cloud Database Synchronization (100% Free Tier, Auto-Updating)
+    let unsubProducts: (() => void) | null = null;
+    let unsubLogs: (() => void) | null = null;
+    let unsubSettings: (() => void) | null = null;
+
+    ensureFirebaseAuth().then(() => {
+      try {
+        // 1. Real-time Firestore Products sync across all devices
+        unsubProducts = onSnapshot(collection(db, PRODUCTS_COLLECTION), (snapshot) => {
+          if (!snapshot.empty) {
+            const list: Product[] = [];
+            snapshot.forEach((d) => {
+              const item = d.data() as Product;
+              if (item && item.id) list.push(item);
+            });
+            if (list.length > 0) {
+              setProducts(list);
+              if (typeof window !== 'undefined') {
+                try {
+                  localStorage.setItem('stz_saved_products', JSON.stringify(list));
+                } catch (e) {}
+              }
+            }
+          } else {
+            // Firestore has no products (catalog is empty)
+            setProducts([]);
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem('stz_saved_products');
+            }
+          }
+        }, (err) => {
+          if (err?.code === 'permission-denied') {
+            handleFirestoreError(err, OperationType.GET, PRODUCTS_COLLECTION);
+          } else {
+            console.warn('[Firestore] Products real-time listener:', err);
+          }
+        });
+
+        // 2. Real-time Firestore Logs sync
+        const logsQ = query(collection(db, LOGS_COLLECTION), orderBy('timestamp', 'desc'), limit(50));
+        unsubLogs = onSnapshot(logsQ, (snapshot) => {
+          if (!snapshot.empty) {
+            const logList: StockLog[] = [];
+            snapshot.forEach((d) => {
+              const item = d.data() as StockLog;
+              if (item && item.id) logList.push(item);
+            });
+            if (logList.length > 0) {
+              setStockLogs(logList);
+            }
+          }
+        }, (err) => {
+          if (err?.code === 'permission-denied') {
+            handleFirestoreError(err, OperationType.GET, LOGS_COLLECTION);
+          } else {
+            console.warn('[Firestore] Logs real-time listener:', err);
+          }
+        });
+
+        // 3. Real-time Firestore Settings sync
+        unsubSettings = onSnapshot(doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID), (snap) => {
+          if (snap.exists()) {
+            const data = snap.data() as AppSettings;
+            if (data) {
+              setSettings((prev) => ({ ...prev, ...data }));
+            }
+          }
+        }, (err) => {
+          if (err?.code === 'permission-denied') {
+            handleFirestoreError(err, OperationType.GET, `${SETTINGS_COLLECTION}/${SETTINGS_DOC_ID}`);
+          } else {
+            console.warn('[Firestore] Settings real-time listener:', err);
+          }
+        });
+      } catch (err) {
+        console.warn('[Firestore] Listener initialization error:', err);
+      }
+    });
+
+    return () => {
+      if (bc) bc.close();
+      if (unsubProducts) unsubProducts();
+      if (unsubLogs) unsubLogs();
+      if (unsubSettings) unsubSettings();
+      clearInterval(fallbackPollInterval);
+      clearInterval(gentleSanitySync);
+      document.removeEventListener('visibilitychange', handleWakeOrFocus);
+      window.removeEventListener('focus', handleWakeOrFocus);
+      window.removeEventListener('online', handleWakeOrFocus);
+      if (socketRef.current) socketRef.current.close();
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+    };
+  }, [connectWebSocket, refreshData]);
+
+  // Settings Actions
+  const updateSettings = async (newSettings: Partial<AppSettings>): Promise<boolean> => {
+    try {
+      const merged = {
+        ...settings,
+        ...newSettings,
+        profile: {
+          ...settings.profile,
+          ...(newSettings.profile || {}),
+        },
+      };
+      setSettings(merged);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('stz_cached_settings', JSON.stringify(merged));
+      }
+
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          settings: merged,
+          deviceId: currentDevice.deviceId,
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.settings) {
+          setSettings(data.settings);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('stz_cached_settings', JSON.stringify(data.settings));
+          }
+          saveSettingsToFirestore(data.settings);
+        } else {
+          saveSettingsToFirestore(merged);
+        }
+        return true;
+      }
+      saveSettingsToFirestore(merged);
+      return false;
+    } catch (err) {
+      console.error('Error updating settings:', err);
+      return false;
+    }
+  };
+
+  const resetSettings = async (): Promise<boolean> => {
+    try {
+      saveSettingsToFirestore(DEFAULT_SETTINGS);
+      const res = await fetch('/api/settings/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId: currentDevice.deviceId,
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.settings) {
+          setSettings(data.settings);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('stz_cached_settings', JSON.stringify(data.settings));
+          }
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Error resetting settings:', err);
+      return false;
+    }
+  };
+
+  // Kosongkan semua stok
+  const clearAllStock = async (pin: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/stock/clear-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pin,
+          deviceId: currentDevice.deviceId,
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Gagal mengosongkan stok' };
+      }
+
+      if (data.products) {
+        setProducts(data.products);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('stz_saved_products', JSON.stringify(data.products));
+          } catch (e) {}
+        }
+        batchSyncProductsToFirestore(data.products, data.log ? [data.log] : undefined);
+      }
+      if (data.log) {
+        setStockLogs(prev => [data.log, ...prev]);
+        saveLogToFirestore(data.log);
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error('Error clearing all stock:', err);
+      return { success: false, error: err?.message || 'Koneksi gagal saat mengosongkan stok' };
+    }
+  };
+
+  // Hapus semua produk dari katalog
+  const clearAllProducts = async (pin: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const oldProducts = [...products];
+      const res = await fetch('/api/products/clear-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pin,
+          deviceId: currentDevice.deviceId,
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Gagal menghapus seluruh produk' };
+      }
+
+      setProducts([]);
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('stz_saved_products');
+      }
+      await clearAllProductsFromFirestore().catch(() => {});
+      for (const p of oldProducts) {
+        deleteProductFromFirestore(p.id).catch(() => {});
+      }
+      if (data.log) {
+        setStockLogs(prev => [data.log, ...prev]);
+        saveLogToFirestore(data.log);
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error('Error clearing all products:', err);
+      return { success: false, error: err?.message || 'Koneksi gagal saat menghapus produk' };
+    }
+  };
+
+  // Hapus aktivitas hari ini
+  const clearTodayLogs = async (pin: string): Promise<{ success: boolean; error?: string; count?: number }> => {
+    try {
+      const res = await fetch('/api/logs/clear-today', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pin,
+          deviceId: currentDevice.deviceId,
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Gagal menghapus aktivitas hari ini' };
+      }
+
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const todayDateStr = `${year}-${month}-${day}`;
+
+      setStockLogs(prev => prev.filter(log => {
+        try {
+          const d = new Date(log.timestamp);
+          const lYear = d.getFullYear();
+          const lMonth = String(d.getMonth() + 1).padStart(2, '0');
+          const lDay = String(d.getDate()).padStart(2, '0');
+          return `${lYear}-${lMonth}-${lDay}` !== todayDateStr;
+        } catch {
+          return true;
+        }
+      }));
+
+      return { success: true, count: data.deletedCount };
+    } catch (err: any) {
+      console.error('Error clearing today logs:', err);
+      return { success: false, error: err?.message || 'Koneksi gagal saat menghapus aktivitas' };
+    }
+  };
+
+  // Stock Mutations Actions
+  const adjustStock = async (
+    productId: string,
+    variantId: string,
+    delta: number,
+    changeType: StockChangeType = 'adjustment',
+    reason: string = ''
+  ): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/stock/adjust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId,
+          variantId,
+          delta,
+          changeType,
+          reason,
+          deviceId: currentDevice.deviceId,
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Gagal memperbarui stok di server');
+      }
+
+      const data = await response.json();
+      if (data.product) {
+        const clonedProduct: Product = {
+          ...data.product,
+          variants: data.product.variants.map((v: any) => ({ ...v })),
+        };
+        setProducts(prev => prev.map(p => (p.id === clonedProduct.id ? clonedProduct : p)));
+
+        if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+          try {
+            const bc = new BroadcastChannel('stz_inventory_channel');
+            bc.postMessage({
+              type: 'STOCK_UPDATED',
+              payload: {
+                product: clonedProduct,
+                log: data.log,
+                isLowStock: clonedProduct.variants.some((v: any) => v.stock <= v.minStock && v.stock > 0),
+                isOutOfStock: clonedProduct.totalStock === 0,
+              },
+              meta: {
+                deviceId: currentDevice.deviceId,
+                deviceName: currentDevice.deviceName,
+                operatorName: currentDevice.operatorName,
+                timestamp: new Date().toISOString(),
+              },
+            });
+            bc.close();
+          } catch (e) {}
+        }
+      }
+      if (data.log) {
+        setStockLogs(prev => [data.log, ...prev.filter(l => l.id !== data.log.id)]);
+        saveLogToFirestore(data.log);
+      }
+      if (data.product) {
+        syncProductToFirestore(data.product);
+      }
+      return true;
+    } catch (err) {
+      console.error('Error adjusting stock:', err);
+      return false;
+    }
+  };
+
+  const batchAdjustStock = async (
+    items: Array<{
+      productId: string;
+      variantId: string;
+      delta: number;
+      changeType?: StockChangeType;
+      reason?: string;
+    }>
+  ): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/stock/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items,
+          deviceId: currentDevice.deviceId,
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data.affectedProducts)) {
+          setProducts(prev => {
+            const map = new Map(prev.map(p => [p.id, p]));
+            for (const p of data.affectedProducts) {
+              map.set(p.id, p);
+            }
+            return Array.from(map.values());
+          });
+          batchSyncProductsToFirestore(data.affectedProducts, data.logs);
+        }
+        if (Array.isArray(data.logs)) {
+          setStockLogs(prev => [...data.logs, ...prev].slice(0, 100));
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Error batch adjusting stock:', err);
+      return false;
+    }
+  };
+
+  const createProduct = async (productData: Partial<Product>): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...productData,
+          deviceId: currentDevice.deviceId,
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.product) {
+          const clonedProduct: Product = {
+            ...data.product,
+            variants: Array.isArray(data.product.variants) ? data.product.variants.map((v: any) => ({ ...v })) : [],
+          };
+          setProducts(prev => {
+            const next = [clonedProduct, ...prev.filter(p => p.id !== clonedProduct.id)];
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem('stz_saved_products', JSON.stringify(next));
+              } catch (e) {}
+            }
+            return next;
+          });
+
+          if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+            try {
+              const bc = new BroadcastChannel('stz_inventory_channel');
+              bc.postMessage({
+                type: 'PRODUCT_CREATED',
+                payload: { product: clonedProduct, log: data.log },
+                meta: {
+                  deviceId: currentDevice.deviceId,
+                  deviceName: currentDevice.deviceName,
+                  operatorName: currentDevice.operatorName,
+                  timestamp: new Date().toISOString(),
+                },
+              });
+              bc.close();
+            } catch (e) {}
+          }
+          syncProductToFirestore(clonedProduct);
+        }
+        if (data.log) {
+          setStockLogs(prev => [data.log, ...prev].slice(0, 100));
+          saveLogToFirestore(data.log);
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Error creating product:', err);
+      return false;
+    }
+  };
+
+  const updateProduct = async (id: string, productData: Partial<Product>): Promise<boolean> => {
+    try {
+      const response = await fetch(`/api/products/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...productData,
+          deviceId: currentDevice.deviceId,
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.product) {
+          const clonedProduct: Product = {
+            ...data.product,
+            variants: Array.isArray(data.product.variants) ? data.product.variants.map((v: any) => ({ ...v })) : [],
+          };
+          setProducts(prev => {
+            const next = prev.map(p => (p.id === clonedProduct.id ? clonedProduct : p));
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem('stz_saved_products', JSON.stringify(next));
+              } catch (e) {}
+            }
+            return next;
+          });
+
+          if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+            try {
+              const bc = new BroadcastChannel('stz_inventory_channel');
+              bc.postMessage({
+                type: 'PRODUCT_UPDATED',
+                payload: { product: clonedProduct, log: data.log },
+                meta: {
+                  deviceId: currentDevice.deviceId,
+                  deviceName: currentDevice.deviceName,
+                  operatorName: currentDevice.operatorName,
+                  timestamp: new Date().toISOString(),
+                },
+              });
+              bc.close();
+            } catch (e) {}
+          }
+          syncProductToFirestore(clonedProduct);
+        }
+        if (data.log) {
+          setStockLogs(prev => [data.log, ...prev.filter(l => l.id !== data.log.id)].slice(0, 100));
+          saveLogToFirestore(data.log);
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Error updating product:', err);
+      return false;
+    }
+  };
+
+  const deleteProduct = async (id: string): Promise<boolean> => {
+    try {
+      const params = new URLSearchParams({
+        deviceId: currentDevice.deviceId,
+        deviceName: currentDevice.deviceName,
+        operatorName: currentDevice.operatorName,
+      });
+      const response = await fetch(`/api/products/${id}?${params.toString()}`, {
+        method: 'DELETE',
+      });
+      deleteProductFromFirestore(id);
+      if (response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setProducts(prev => {
+          const next = prev.filter(p => p.id !== id);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('stz_saved_products', JSON.stringify(next));
+            } catch (e) {}
+          }
+          return next;
+        });
+
+        if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+          try {
+            const bc = new BroadcastChannel('stz_inventory_channel');
+            bc.postMessage({
+              type: 'PRODUCT_DELETED',
+              payload: { productId: id, productName: data.productName || 'Produk' },
+              meta: {
+                deviceId: currentDevice.deviceId,
+                deviceName: currentDevice.deviceName,
+                operatorName: currentDevice.operatorName,
+                timestamp: new Date().toISOString(),
+              },
+            });
+            bc.close();
+          } catch (e) {}
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Error deleting product:', err);
+      return false;
+    }
+  };
+
+  const resetDemoData = async () => {
+    try {
+      await fetch('/api/reset-demo', { method: 'POST' });
+      await refreshData();
+    } catch (err) {
+      console.error('Error resetting demo data:', err);
+    }
+  };
+
+  // Helper function to simulate a change from a separate external device (e.g. "Kasir 2 - Lantai 2" or "Gudang Konveksi")
+  const simulateRemoteChange = async (scenario: 'sale' | 'restock' | 'critical' = 'sale') => {
+    if (products.length === 0) return;
+
+    if (scenario === 'sale') {
+      // Find a product with stock
+      const product = products.find(p => p.variants.some(v => v.stock > 0)) || products[0];
+      const variant = product.variants.find(v => v.stock > 0) || product.variants[0];
+      await fetch('/api/stock/adjust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: product.id,
+          variantId: variant.id,
+          delta: -1,
+          changeType: 'sale',
+          reason: 'Transaksi Kasir 2 (Lantai 2)',
+          deviceId: 'simulated-device-cashier-2',
+          deviceName: 'Tablet Kasir 2 (Lt. 2)',
+          operatorName: 'Dinda (Kasir 2)',
+        }),
+      });
+    } else if (scenario === 'restock') {
+      const product = products[0];
+      const variant = product.variants[0];
+      await fetch('/api/stock/adjust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: product.id,
+          variantId: variant.id,
+          delta: 10,
+          changeType: 'restock',
+          reason: 'Penerimaan Ekspedisi Bahan Konveksi',
+          deviceId: 'simulated-device-gudang-pusat',
+          deviceName: 'Scanner Gudang Ekspedisi',
+          operatorName: 'Budi (Gudang)',
+        }),
+      });
+    } else {
+      // Critical: drop stock to 1 to trigger low stock warning
+      const product = products[1] || products[0];
+      const variant = product.variants[0];
+      const targetDelta = 1 - variant.stock;
+      await fetch('/api/stock/adjust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: product.id,
+          variantId: variant.id,
+          delta: targetDelta,
+          changeType: 'sale',
+          reason: 'Pembelian Grosir Reseller (Sisa 1 pcs)',
+          deviceId: 'simulated-device-admin-olshop',
+          deviceName: 'Admin WhatsApp / Shopee',
+          operatorName: 'Maya (Admin Online)',
+        }),
+      });
+    }
+  };
+
+  return (
+    <InventoryContext.Provider
+      value={{
+        products,
+        stockLogs,
+        connectedDevicesCount,
+        connectedDevices,
+        connectionStatus,
+        activeToasts,
+        currentDevice,
+        soundOn,
+        toggleSound,
+        updateDeviceProfile,
+        isAuthenticated,
+        unlockWithPin,
+        lockApp,
+        settings,
+        updateSettings,
+        resetSettings,
+        clearAllStock,
+        clearAllProducts,
+        clearTodayLogs,
+        adjustStock,
+        batchAdjustStock,
+        createProduct,
+        updateProduct,
+        deleteProduct,
+        dismissToast,
+        clearAllToasts,
+        addNotificationToast,
+        resetDemoData,
+        simulateRemoteChange,
+        isRefreshing,
+        refreshData,
+      }}
+    >
+      {children}
+    </InventoryContext.Provider>
+  );
+};
+
+export const useInventory = () => {
+  const context = useContext(InventoryContext);
+  if (!context) {
+    throw new Error('useInventory must be used within an InventoryProvider');
+  }
+  return context;
+};
