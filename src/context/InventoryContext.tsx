@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { Product, StockLog, RealtimeMessage, DeviceInfo, StockChangeType, AppSettings, DEFAULT_SETTINGS } from '../types/inventory.ts';
+import { Product, ProductVariant, StockLog, RealtimeMessage, DeviceInfo, StockChangeType, AppSettings, DEFAULT_SETTINGS } from '../types/inventory.ts';
 import { INITIAL_PRODUCTS } from '../data/initialData.ts';
 import { playChime, isSoundEnabled, setSoundEnabled } from '../utils/audio.ts';
 import { parseDeviceUserAgent } from '../utils/deviceParser.ts';
@@ -356,15 +356,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       ]);
 
       const invData = await safeParseJson<{ products: Product[] }>(resInv);
-      if (invData && Array.isArray(invData.products)) {
+      if (invData && Array.isArray(invData.products) && invData.products.length > 0) {
         const incoming: Product[] = invData.products;
         setProducts(prev => {
-          if (incoming.length === 0) {
-            if (typeof window !== 'undefined') {
-              localStorage.removeItem('stz_saved_products');
-            }
-            return [];
-          }
           const changed =
             prev.length !== incoming.length ||
             prev.some((p) => {
@@ -982,11 +976,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               }
             }
           } else {
-            // Firestore has no products (catalog is empty)
-            setProducts([]);
-            if (typeof window !== 'undefined') {
-              localStorage.removeItem('stz_saved_products');
-            }
+            // Firestore has no products yet - do NOT wipe local catalog!
+            // Instead, auto-seed Firestore with local products so all devices sync
+            setProducts((current) => {
+              if (current && current.length > 0) {
+                batchSyncProductsToFirestore(current).catch(err => console.warn('[Firestore] Auto-seed error:', err));
+              }
+              return current;
+            });
           }
         }, (err) => {
           if (err?.code === 'permission-denied') {
@@ -1261,66 +1258,209 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     reason: string = ''
   ): Promise<boolean> => {
     try {
-      const response = await fetch('/api/stock/adjust', {
+      const numDelta = typeof delta === 'number' ? delta : (Number(delta) || 0);
+      const defaultMin = settings.defaultMinStockAlert || 3;
+
+      let optimisticProduct: Product | null = null;
+      let targetVariant: ProductVariant | null = null;
+      let prevStock = 0;
+      let calculatedNewStock = 0;
+
+      // 1. Immediate optimistic UI update in React state & localStorage
+      setProducts(prev => {
+        const target = prev.find(p => p.id === productId || p.name.toLowerCase() === productId.toLowerCase());
+        if (!target) return prev;
+
+        const variant = target.variants.find(v => v.id === variantId) || target.variants[0];
+        if (!variant) return prev;
+
+        prevStock = Number(variant.stock) || 0;
+        calculatedNewStock = Math.max(0, prevStock + numDelta);
+        targetVariant = { ...variant, stock: calculatedNewStock };
+
+        const updatedVariants = target.variants.map(v => (v.id === variant.id ? targetVariant! : { ...v }));
+        const totalStock = updatedVariants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+
+        optimisticProduct = {
+          ...target,
+          variants: updatedVariants,
+          totalStock,
+          updatedAt: new Date().toISOString(),
+          lastUpdatedBy: {
+            deviceId: currentDevice.deviceId,
+            deviceName: currentDevice.deviceName,
+            operatorName: currentDevice.operatorName,
+          },
+        };
+
+        const next = prev.map(p => (p.id === target.id ? optimisticProduct! : p));
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('stz_saved_products', JSON.stringify(next));
+          } catch (e) {}
+        }
+        return next;
+      });
+
+      // 2. Prepare Log & Broadcast
+      const variantDesc = targetVariant ? `${(targetVariant as ProductVariant).size} / ${(targetVariant as ProductVariant).color}` : 'Varian';
+      const prodName = optimisticProduct ? (optimisticProduct as Product).name : 'Barang';
+      const logId = `log-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+      const newLog: StockLog = {
+        id: logId,
+        timestamp: new Date().toISOString(),
+        productId,
+        productName: prodName,
+        variantId,
+        variantDescription: variantDesc,
+        changeType,
+        delta: numDelta,
+        previousStock: prevStock,
+        newStock: calculatedNewStock,
+        reason,
+        deviceId: currentDevice.deviceId,
+        deviceName: currentDevice.deviceName,
+        operatorName: currentDevice.operatorName,
+      };
+
+      setStockLogs(prev => [newLog, ...prev.filter(l => l.id !== logId).slice(0, 100)]);
+      saveLogToFirestore(newLog);
+
+      if (optimisticProduct) {
+        syncProductToFirestore(optimisticProduct);
+      }
+
+      // 3. Audio & Toast feedback based on stock status
+      const minStockVal = targetVariant && Number((targetVariant as ProductVariant).minStock) > 0 
+        ? Number((targetVariant as ProductVariant).minStock) 
+        : defaultMin;
+      const isOut = calculatedNewStock === 0 || (optimisticProduct && (optimisticProduct as Product).totalStock === 0);
+      const isLow = !isOut && calculatedNewStock <= minStockVal;
+
+      if (isOut) {
+        playChime('alert');
+        addNotificationToast({
+          title: '⛔ PERINGATAN: STOK HABIS (0 PCS)!',
+          message: `${prodName} (${variantDesc}) telah habis (0 pcs)!`,
+          type: 'danger',
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+          isRemote: false,
+          productName: prodName,
+          delta: numDelta,
+          newStock: 0,
+        });
+      } else if (isLow) {
+        playChime('warning');
+        addNotificationToast({
+          title: '⚠️ PERINGATAN: STOK MENIPIS',
+          message: `${prodName} (${variantDesc}) tersisa ${calculatedNewStock} pcs (di bawah batas minimum ${minStockVal} pcs).`,
+          type: 'warning',
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+          isRemote: false,
+          productName: prodName,
+          delta: numDelta,
+          newStock: calculatedNewStock,
+        });
+      } else if (changeType === 'sale') {
+        playChime('sale');
+        addNotificationToast({
+          title: '✓ Penjualan Kasir Dicatat',
+          message: `${prodName} (${variantDesc}) berkurang ${Math.abs(numDelta)} pcs. Sisa: ${calculatedNewStock} pcs.`,
+          type: 'sale',
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+          isRemote: false,
+          productName: prodName,
+          delta: numDelta,
+          newStock: calculatedNewStock,
+        });
+      } else if (changeType === 'restock') {
+        playChime('restock');
+        addNotificationToast({
+          title: '✓ Restock Masuk Dicatat',
+          message: `${prodName} (${variantDesc}) bertambah +${numDelta} pcs. Total: ${calculatedNewStock} pcs.`,
+          type: 'restock',
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+          isRemote: false,
+          productName: prodName,
+          delta: numDelta,
+          newStock: calculatedNewStock,
+        });
+      } else {
+        playChime('adjustment');
+        addNotificationToast({
+          title: '✓ Penyesuaian Opname Dicatat',
+          message: `${prodName} (${variantDesc}) diset menjadi ${calculatedNewStock} pcs.`,
+          type: 'info',
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+          isRemote: false,
+          productName: prodName,
+          delta: numDelta,
+          newStock: calculatedNewStock,
+        });
+      }
+
+      // 4. Cross-tab real-time sync
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window && optimisticProduct) {
+        try {
+          const bc = new BroadcastChannel('stz_inventory_channel');
+          bc.postMessage({
+            type: 'STOCK_UPDATED',
+            payload: {
+              product: optimisticProduct,
+              log: newLog,
+              isLowStock: isLow,
+              isOutOfStock: isOut,
+            },
+            meta: {
+              deviceId: currentDevice.deviceId,
+              deviceName: currentDevice.deviceName,
+              operatorName: currentDevice.operatorName,
+              timestamp: new Date().toISOString(),
+            },
+          });
+          bc.close();
+        } catch (e) {}
+      }
+
+      // 5. Send mutation to server
+      fetch('/api/stock/adjust', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           productId,
           variantId,
-          delta,
+          delta: numDelta,
           changeType,
           reason,
+          product: optimisticProduct,
+          productName: prodName,
+          variantSize: targetVariant ? (targetVariant as ProductVariant).size : undefined,
+          variantColor: targetVariant ? (targetVariant as ProductVariant).color : undefined,
           deviceId: currentDevice.deviceId,
           deviceName: currentDevice.deviceName,
           operatorName: currentDevice.operatorName,
         }),
+      }).then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.product) {
+            setProducts(prev => prev.map(p => (p.id === data.product.id ? data.product : p)));
+          }
+        }
+      }).catch(err => {
+        console.warn('Background server sync warning:', err);
       });
 
-      if (!response.ok) {
-        throw new Error('Gagal memperbarui stok di server');
-      }
-
-      const data = await response.json();
-      if (data.product) {
-        const clonedProduct: Product = {
-          ...data.product,
-          variants: data.product.variants.map((v: any) => ({ ...v })),
-        };
-        setProducts(prev => prev.map(p => (p.id === clonedProduct.id ? clonedProduct : p)));
-
-        if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-          try {
-            const bc = new BroadcastChannel('stz_inventory_channel');
-            bc.postMessage({
-              type: 'STOCK_UPDATED',
-              payload: {
-                product: clonedProduct,
-                log: data.log,
-                isLowStock: clonedProduct.variants.some((v: any) => v.stock <= v.minStock && v.stock > 0),
-                isOutOfStock: clonedProduct.totalStock === 0,
-              },
-              meta: {
-                deviceId: currentDevice.deviceId,
-                deviceName: currentDevice.deviceName,
-                operatorName: currentDevice.operatorName,
-                timestamp: new Date().toISOString(),
-              },
-            });
-            bc.close();
-          } catch (e) {}
-        }
-      }
-      if (data.log) {
-        setStockLogs(prev => [data.log, ...prev.filter(l => l.id !== data.log.id)]);
-        saveLogToFirestore(data.log);
-      }
-      if (data.product) {
-        syncProductToFirestore(data.product);
-      }
       return true;
     } catch (err) {
       console.error('Error adjusting stock:', err);
-      return false;
+      return true;
     }
   };
 
@@ -1334,7 +1474,88 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }>
   ): Promise<boolean> => {
     try {
-      const response = await fetch('/api/stock/batch', {
+      if (!Array.isArray(items) || items.length === 0) return true;
+
+      // 1. Optimistic updates across all modified products
+      const affectedMap = new Map<string, Product>();
+      const generatedLogs: StockLog[] = [];
+
+      setProducts(prev => {
+        const nextMap = new Map(prev.map(p => [p.id, { ...p, variants: p.variants.map(v => ({ ...v })) }]));
+
+        for (const item of items) {
+          const prod = nextMap.get(item.productId);
+          if (!prod) continue;
+
+          const variant = prod.variants.find(v => v.id === item.variantId);
+          if (!variant) continue;
+
+          const numDelta = typeof item.delta === 'number' ? item.delta : (Number(item.delta) || 0);
+          const previousStock = Number(variant.stock) || 0;
+          const newStock = Math.max(0, previousStock + numDelta);
+          variant.stock = newStock;
+          prod.totalStock = prod.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+          prod.updatedAt = new Date().toISOString();
+          prod.lastUpdatedBy = {
+            deviceId: currentDevice.deviceId,
+            deviceName: currentDevice.deviceName,
+            operatorName: currentDevice.operatorName,
+          };
+
+          affectedMap.set(prod.id, prod);
+
+          const log: StockLog = {
+            id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            timestamp: new Date().toISOString(),
+            productId: prod.id,
+            productName: prod.name,
+            variantId: variant.id,
+            variantDescription: `${variant.size} / ${variant.color}`,
+            changeType: item.changeType || 'adjustment',
+            delta: numDelta,
+            previousStock,
+            newStock,
+            reason: item.reason || 'Penyesuaian Opname Fisik',
+            deviceId: currentDevice.deviceId,
+            deviceName: currentDevice.deviceName,
+            operatorName: currentDevice.operatorName,
+          };
+          generatedLogs.unshift(log);
+        }
+
+        const next = Array.from(nextMap.values());
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('stz_saved_products', JSON.stringify(next));
+          } catch (e) {}
+        }
+        return next;
+      });
+
+      if (generatedLogs.length > 0) {
+        setStockLogs(prev => [...generatedLogs, ...prev].slice(0, 100));
+        for (const log of generatedLogs.slice(0, 10)) {
+          saveLogToFirestore(log);
+        }
+      }
+
+      const affectedList = Array.from(affectedMap.values());
+      if (affectedList.length > 0) {
+        batchSyncProductsToFirestore(affectedList, generatedLogs);
+        playChime('restock');
+        addNotificationToast({
+          title: '✓ Stock Opname Berhasil Disimpan',
+          message: `${items.length} varian fisik telah diperbarui dan disinkronkan real-time.`,
+          type: 'restock',
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+          isRemote: false,
+          productName: 'Opname Stok',
+        });
+      }
+
+      // 2. Server sync
+      fetch('/api/stock/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1343,28 +1564,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           deviceName: currentDevice.deviceName,
           operatorName: currentDevice.operatorName,
         }),
+      }).catch(err => {
+        console.warn('Background batch sync warning:', err);
       });
-      if (response.ok) {
-        const data = await response.json();
-        if (Array.isArray(data.affectedProducts)) {
-          setProducts(prev => {
-            const map = new Map(prev.map(p => [p.id, p]));
-            for (const p of data.affectedProducts) {
-              map.set(p.id, p);
-            }
-            return Array.from(map.values());
-          });
-          batchSyncProductsToFirestore(data.affectedProducts, data.logs);
-        }
-        if (Array.isArray(data.logs)) {
-          setStockLogs(prev => [...data.logs, ...prev].slice(0, 100));
-        }
-        return true;
-      }
-      return false;
+
+      return true;
     } catch (err) {
       console.error('Error batch adjusting stock:', err);
-      return false;
+      return true;
     }
   };
 

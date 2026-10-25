@@ -37,6 +37,12 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
     (p) => Number(p.totalStock) === 0 || (p.variants || []).some((v) => Number(v.stock) <= 0)
   ).length;
 
+  // Total individual variants at 0 pcs
+  const outOfStockVariantsCount = products.reduce(
+    (acc, p) => acc + (p.variants || []).filter((v) => Number(v.stock) <= 0).length,
+    0
+  );
+
   // Products with variants that are low (stock > 0 and <= minStock)
   const lowStockProducts = products.filter((p) =>
     (p.variants || []).some((v) => {
@@ -45,6 +51,18 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       return vStock > 0 && vStock <= min;
     })
   ).length;
+
+  // Total individual variants that are low
+  const lowStockVariantsCount = products.reduce((acc, p) => {
+    return (
+      acc +
+      (p.variants || []).filter((v) => {
+        const vStock = Number(v.stock);
+        const min = Number(v.minStock) > 0 ? Number(v.minStock) : defaultMin;
+        return vStock > 0 && vStock <= min;
+      }).length
+    );
+  }, 0);
 
   const todayLogsCount = stockLogs.filter((l) => {
     try {
@@ -111,7 +129,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
 
       {/* 3. Stok Menipis */}
       <div
-        onClick={onFilterLowStock}
+        onClick={activeFilter === 'low' ? onResetFilter : onFilterLowStock}
         className={`p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer ${
           activeFilter === 'low'
             ? 'bg-amber-500 text-slate-950 font-bold border-amber-600 shadow-md ring-2 ring-amber-300'
@@ -137,13 +155,13 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
           <span className="text-xs font-normal ml-1 opacity-80">model</span>
         </div>
         <div className={`text-[10px] sm:text-[11px] mt-0.5 sm:mt-1 truncate ${activeFilter === 'low' ? 'text-slate-900 font-semibold' : lowStockProducts > 0 ? 'text-amber-700 font-bold' : 'text-slate-400'}`}>
-          {lowStockProducts > 0 ? 'Stok ≤ batas min' : 'Stok aman'}
+          {lowStockVariantsCount > 0 ? `${lowStockVariantsCount} varian menipis` : 'Stok aman'}
         </div>
       </div>
 
       {/* 4. Stok Habis (0) */}
       <div
-        onClick={onFilterOutOfStock}
+        onClick={activeFilter === 'out' ? onResetFilter : onFilterOutOfStock}
         className={`p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer ${
           activeFilter === 'out'
             ? 'bg-rose-600 text-white border-rose-700 shadow-md ring-2 ring-rose-400'
@@ -169,10 +187,8 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
           <span className="text-xs font-normal ml-1 opacity-80">model</span>
         </div>
         <div className={`text-[10px] sm:text-[11px] mt-0.5 sm:mt-1 truncate ${activeFilter === 'out' ? 'text-rose-100 font-bold' : outOfStockProducts > 0 ? 'text-rose-600 font-bold' : 'text-slate-400'}`}>
-          {outOfStockProducts > 0 
-            ? totallyOutOfStockProducts > 0 
-              ? `${totallyOutOfStockProducts} total • ${outOfStockProducts - totallyOutOfStockProducts} varian` 
-              : `${outOfStockProducts} varian 0 pcs`
+          {outOfStockVariantsCount > 0 
+            ? `${outOfStockVariantsCount} varian 0 pcs` 
             : 'Semua tersedia'}
         </div>
       </div>

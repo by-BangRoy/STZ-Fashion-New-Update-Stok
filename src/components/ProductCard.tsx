@@ -178,7 +178,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
                     <div className="flex items-center gap-1.5 shrink-0">
                       <span
-                        className={`font-black text-xs px-2 py-0.5 rounded-md shadow-xs ${
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedVariantId(variant.id);
+                          onOpenAdjust(product, variant.id);
+                        }}
+                        title={`Ubah stok ${variant.size} - ${variant.color}`}
+                        className={`font-black text-xs px-2 py-0.5 rounded-md shadow-xs hover:scale-105 active:scale-95 transition-transform ${
                           isOut
                             ? 'bg-rose-600 text-white'
                             : isLow

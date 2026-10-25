@@ -128,12 +128,14 @@ export const ProductTableView: React.FC<ProductTableViewProps> = ({
                         return (
                           <div
                             key={variant.id}
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs shadow-xs transition-all ${
+                            onClick={() => onOpenAdjust(product, variant.id)}
+                            title={`Klik untuk ubah stok varian ${variant.size} - ${variant.color}`}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs shadow-xs transition-all cursor-pointer hover:shadow-md hover:scale-[1.02] active:scale-95 ${
                               vOut
-                                ? 'bg-rose-50 border-rose-400 text-rose-950 font-bold ring-2 ring-rose-400/50'
+                                ? 'bg-rose-50 border-rose-400 text-rose-950 font-bold ring-2 ring-rose-400/50 hover:bg-rose-100'
                                 : vLow
-                                ? 'bg-amber-50 border-amber-400 text-amber-950 font-bold ring-1 ring-amber-400/40'
-                                : 'bg-emerald-50/60 border-emerald-200/90 text-emerald-950'
+                                ? 'bg-amber-50 border-amber-400 text-amber-950 font-bold ring-1 ring-amber-400/40 hover:bg-amber-100'
+                                : 'bg-emerald-50/60 border-emerald-200/90 text-emerald-950 hover:bg-emerald-100/80'
                             }`}
                           >
                             {/* Color chip */}

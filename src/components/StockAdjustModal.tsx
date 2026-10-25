@@ -115,14 +115,16 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
     }
   }, [activeProduct.id, activeProduct.name, activeProduct.category, activeProduct.sku, activeProduct.location]);
 
-  // Sync selected variant when opened with initialVariantId
+  // Sync selected variant when opened with initialVariantId or when product changes
   useEffect(() => {
-    if (initialVariantId) {
-      setSelectedVariantId(initialVariantId);
-    } else if (activeProduct.variants[0]) {
-      setSelectedVariantId(activeProduct.variants[0].id);
+    if (isOpen) {
+      if (initialVariantId && activeProduct.variants.some((v) => v.id === initialVariantId)) {
+        setSelectedVariantId(initialVariantId);
+      } else if (activeProduct.variants[0]) {
+        setSelectedVariantId(activeProduct.variants[0].id);
+      }
     }
-  }, [initialVariantId, activeProduct.variants]);
+  }, [isOpen, initialVariantId, activeProduct.id]);
 
   // Lock body scroll when open
   useEffect(() => {

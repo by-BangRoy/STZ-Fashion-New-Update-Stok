@@ -54,6 +54,10 @@ function DashboardView() {
     return products.filter((p) => Number(p.totalStock) === 0 || (p.variants || []).some((v) => Number(v.stock) <= 0));
   }, [products]);
 
+  const outOfStockVariantsCount = useMemo(() => {
+    return products.reduce((acc, p) => acc + (p.variants || []).filter((v) => Number(v.stock) <= 0).length, 0);
+  }, [products]);
+
   const lowStockItems = useMemo(() => {
     return products.filter((p) => {
       return (p.variants || []).some((v) => {
@@ -62,6 +66,19 @@ function DashboardView() {
         return vStock > 0 && vStock <= min;
       });
     });
+  }, [products, defaultMinStock]);
+
+  const lowStockVariantsCount = useMemo(() => {
+    return products.reduce((acc, p) => {
+      return (
+        acc +
+        (p.variants || []).filter((v) => {
+          const vStock = Number(v.stock);
+          const min = Number(v.minStock) > 0 ? Number(v.minStock) : defaultMinStock;
+          return vStock > 0 && vStock <= min;
+        }).length
+      );
+    }, 0);
   }, [products, defaultMinStock]);
 
   const safeStockItems = useMemo(() => {
@@ -294,7 +311,7 @@ function DashboardView() {
                   </div>
                   <div>
                     <div className="font-black text-xs sm:text-sm text-rose-900 flex items-center gap-2">
-                      <span>PERINGATAN: {outOfStockItems.length} Produk Habis (0 Pcs)!</span>
+                      <span>PERINGATAN: {outOfStockVariantsCount} Varian Habis (0 Pcs) di {outOfStockItems.length} Model!</span>
                       <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-rose-600 text-white">
                         Perlu Restock Segera
                       </span>
@@ -306,10 +323,16 @@ function DashboardView() {
                 </div>
 
                 <button
-                  onClick={() => setStockStatusFilter('out')}
-                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-extrabold transition-all shadow-xs shrink-0 self-end sm:self-auto active:scale-95"
+                  onClick={() => setStockStatusFilter((prev) => (prev === 'out' ? 'all' : 'out'))}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all shadow-xs shrink-0 self-end sm:self-auto active:scale-95 ${
+                    stockStatusFilter === 'out'
+                      ? 'bg-slate-900 text-white ring-2 ring-rose-400'
+                      : 'bg-rose-600 hover:bg-rose-700 text-white'
+                  }`}
                 >
-                  Lihat Barang Habis ({outOfStockItems.length})
+                  {stockStatusFilter === 'out'
+                    ? 'Tampilkan Semua Barang'
+                    : `Filter Barang Habis (${outOfStockVariantsCount} Varian • ${outOfStockItems.length} Model)`}
                 </button>
               </div>
             )}
@@ -322,22 +345,28 @@ function DashboardView() {
                   </div>
                   <div>
                     <div className="font-black text-xs sm:text-sm text-amber-950 flex items-center gap-2">
-                      <span>PERINGATAN: {lowStockItems.length} Produk Stok Menipis!</span>
+                      <span>PERINGATAN: {lowStockVariantsCount} Varian Menipis di {lowStockItems.length} Model!</span>
                       <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-amber-400 text-slate-950">
                         Di Bawah Batas Min
                       </span>
                     </div>
                     <p className="text-[11px] text-amber-900/80 mt-0.5">
-                      Jumlah unit fisik di toko berada di bawah batas minimum alarm stok toko.
+                      Jumlah unit fisik di toko berada di bawah batas minimum alarm stok toko (≤{defaultMinStock} pcs).
                     </p>
                   </div>
                 </div>
 
                 <button
-                  onClick={() => setStockStatusFilter('low')}
-                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs font-extrabold transition-all shadow-xs shrink-0 self-end sm:self-auto active:scale-95"
+                  onClick={() => setStockStatusFilter((prev) => (prev === 'low' ? 'all' : 'low'))}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all shadow-xs shrink-0 self-end sm:self-auto active:scale-95 ${
+                    stockStatusFilter === 'low'
+                      ? 'bg-slate-900 text-amber-300 ring-2 ring-amber-400'
+                      : 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                  }`}
                 >
-                  Lihat Barang Menipis ({lowStockItems.length})
+                  {stockStatusFilter === 'low'
+                    ? 'Tampilkan Semua Barang'
+                    : `Filter Barang Menipis (${lowStockVariantsCount} Varian • ${lowStockItems.length} Model)`}
                 </button>
               </div>
             )}
