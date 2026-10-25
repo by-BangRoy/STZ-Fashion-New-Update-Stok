@@ -356,50 +356,59 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       ]);
 
       const invData = await safeParseJson<{ products: Product[] }>(resInv);
-      if (invData && Array.isArray(invData.products) && invData.products.length > 0) {
+      if (invData && Array.isArray(invData.products)) {
         const incoming: Product[] = invData.products;
-        setProducts(prev => {
-          const changed =
-            prev.length !== incoming.length ||
-            prev.some((p) => {
-              const inc = incoming.find((item) => item.id === p.id);
-              if (!inc) return true;
-              if (inc.name !== p.name) return true;
-              if (inc.category !== p.category) return true;
-              if (inc.sku !== p.sku) return true;
-              if (inc.location !== p.location) return true;
-              if (inc.description !== p.description) return true;
-              if (inc.imageUrl !== p.imageUrl) return true;
-              if (inc.totalStock !== p.totalStock) return true;
-              if (inc.updatedAt !== p.updatedAt) return true;
-              if (inc.variants.length !== p.variants.length) return true;
-              return inc.variants.some((iv, idx) => {
-                const pv = p.variants[idx];
-                if (!pv) return true;
-                return (
-                  iv.stock !== pv.stock ||
-                  iv.size !== pv.size ||
-                  iv.color !== pv.color ||
-                  iv.sku !== pv.sku ||
-                  iv.price !== pv.price ||
-                  iv.minStock !== pv.minStock
-                );
-              });
-            });
-          if (changed || prev.length === 0) {
-            const mapped = incoming.map((p) => ({
-              ...p,
-              variants: p.variants.map((v) => ({ ...v })),
-            }));
-            if (typeof window !== 'undefined') {
-              try {
-                localStorage.setItem('stz_saved_products', JSON.stringify(mapped));
-              } catch (e) {}
-            }
-            return mapped;
+        if (incoming.length === 0) {
+          setProducts([]);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.removeItem('stz_saved_products');
+            } catch (e) {}
           }
-          return prev;
-        });
+        } else {
+          setProducts(prev => {
+            const changed =
+              prev.length !== incoming.length ||
+              prev.some((p) => {
+                const inc = incoming.find((item) => item.id === p.id);
+                if (!inc) return true;
+                if (inc.name !== p.name) return true;
+                if (inc.category !== p.category) return true;
+                if (inc.sku !== p.sku) return true;
+                if (inc.location !== p.location) return true;
+                if (inc.description !== p.description) return true;
+                if (inc.imageUrl !== p.imageUrl) return true;
+                if (inc.totalStock !== p.totalStock) return true;
+                if (inc.updatedAt !== p.updatedAt) return true;
+                if (inc.variants.length !== p.variants.length) return true;
+                return inc.variants.some((iv, idx) => {
+                  const pv = p.variants[idx];
+                  if (!pv) return true;
+                  return (
+                    iv.stock !== pv.stock ||
+                    iv.size !== pv.size ||
+                    iv.color !== pv.color ||
+                    iv.sku !== pv.sku ||
+                    iv.price !== pv.price ||
+                    iv.minStock !== pv.minStock
+                  );
+                });
+              });
+            if (changed || prev.length === 0) {
+              const mapped = incoming.map((p) => ({
+                ...p,
+                variants: p.variants.map((v) => ({ ...v })),
+              }));
+              if (typeof window !== 'undefined') {
+                try {
+                  localStorage.setItem('stz_saved_products', JSON.stringify(mapped));
+                } catch (e) {}
+              }
+              return mapped;
+            }
+            return prev;
+          });
+        }
       }
 
       const logsData = await safeParseJson<{ logs: StockLog[] }>(resLogs);
@@ -976,12 +985,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               }
             }
           } else {
-            // Firestore has no products yet - do NOT wipe local catalog!
-            // Instead, auto-seed Firestore with local products so all devices sync
+            // Firestore has no products yet
             setProducts((current) => {
-              if (current && current.length > 0) {
-                batchSyncProductsToFirestore(current).catch(err => console.warn('[Firestore] Auto-seed error:', err));
-              }
               return current;
             });
           }

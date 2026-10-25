@@ -174,7 +174,7 @@ function loadData() {
     if (fs.existsSync(INVENTORY_FILE)) {
       const raw = fs.readFileSync(INVENTORY_FILE, 'utf-8');
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         products = parsed;
         let modified = false;
         for (const p of products) {
@@ -187,14 +187,16 @@ function loadData() {
           saveInventory();
         }
       } else {
-        seedInventoryFromCSV();
+        products = [];
+        saveInventory();
       }
     } else {
-      seedInventoryFromCSV();
+      products = [];
+      saveInventory();
     }
   } catch (err) {
     console.error('Error loading inventory file:', err);
-    seedInventoryFromCSV();
+    products = [];
   }
 
   try {
@@ -464,10 +466,6 @@ app.get('/api/my-ip', (req, res) => {
 
 // Adjust stock of a variant
 app.post('/api/stock/adjust', (req, res) => {
-  if (products.length === 0) {
-    loadData();
-  }
-
   const {
     productId,
     variantId,
@@ -584,10 +582,6 @@ app.post('/api/stock/adjust', (req, res) => {
 
 // Batch adjust (e.g. Stock Opname or Multi-item Checkout)
 app.post('/api/stock/batch', (req, res) => {
-  if (products.length === 0) {
-    loadData();
-  }
-
   const { items, deviceId = 'web', deviceName = 'Perangkat Web', operatorName = 'Staf' } = req.body || {};
 
   if (!Array.isArray(items) || items.length === 0) {

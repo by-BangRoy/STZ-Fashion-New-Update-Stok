@@ -206,17 +206,24 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({ isOpen, onCl
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredEntries.map((entry) => {
-                const delta = entry.actualStock - entry.systemStock;
-                const hasDiff = delta !== 0;
+              {filteredEntries.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-8 text-center text-xs text-slate-400 font-medium">
+                    Belum ada data barang di katalog untuk dilakukan stok opname.
+                  </td>
+                </tr>
+              ) : (
+                filteredEntries.map((entry) => {
+                  const delta = entry.actualStock - entry.systemStock;
+                  const hasDiff = delta !== 0;
 
-                return (
-                  <tr
-                    key={entry.variantId}
-                    className={`transition-colors ${
-                      hasDiff ? 'bg-amber-50/50 hover:bg-amber-50' : 'hover:bg-slate-50'
-                    }`}
-                  >
+                  return (
+                    <tr
+                      key={entry.variantId}
+                      className={`transition-colors ${
+                        hasDiff ? 'bg-amber-50/50 hover:bg-amber-50' : 'hover:bg-slate-50'
+                      }`}
+                    >
                     <td className="py-2.5 px-3 font-bold text-slate-900">{entry.productName}</td>
                     <td className="py-2.5 px-3 text-slate-600">{entry.variantDesc}</td>
                     <td className="py-2.5 px-3 text-center font-bold text-slate-700">
@@ -257,7 +264,7 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({ isOpen, onCl
                     </td>
                   </tr>
                 );
-              })}
+              }))}
             </tbody>
           </table>
         </div>
