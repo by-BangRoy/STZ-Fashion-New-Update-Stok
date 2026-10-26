@@ -166,7 +166,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     setIsSubmitting(true);
     const sanitizedVariants = variants.map((v, i) => ({
       ...v,
-      sku: v.sku?.trim() || '',
+      sku: '',
       size: v.size?.trim() || (variants.length === 1 ? 'All Size' : `Varian ${i + 1}`),
       color: v.color?.trim() || 'Standar',
       stock: Number(v.stock) || 0,
@@ -175,7 +175,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
     const productPayload = {
       name: name.trim(),
-      sku: sku.trim(),
+      sku: '',
       category: category.trim() || 'Umum',
       location: location.trim(),
       imageUrl: imageUrl.trim() || DEFAULT_IMAGE,
@@ -287,32 +287,17 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Kode Barang / SKU
-                </label>
-                <input
-                  type="text"
-                  value={sku}
-                  onChange={(e) => setSku(e.target.value)}
-                  placeholder="Contoh: GM-01 atau STZ-01"
-                  className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Lokasi Rak / Penyimpanan
-                </label>
-                <input
-                  type="text"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  placeholder="Contoh: Rak A-1, Gudang Utama"
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
-                />
-              </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Lokasi Rak / Penyimpanan (Opsional)
+              </label>
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="Kosongkan jika tidak menggunakan nomor rak..."
+                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+              />
             </div>
 
             <div>

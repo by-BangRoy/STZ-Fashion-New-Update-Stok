@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INITIAL_PRODUCTS } from './src/data/initialData.ts';
-import { Product, StockLog, RealtimeMessage, DeviceInfo, AppSettings } from './src/types/inventory.ts';
+import type { Product, StockLog, RealtimeMessage, DeviceInfo, AppSettings } from './src/types/inventory.ts';
 import { parseDeviceUserAgent, formatIpAddress } from './src/utils/deviceParser.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -176,16 +176,6 @@ function loadData() {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         products = parsed;
-        let modified = false;
-        for (const p of products) {
-          if (p.description && (/di+mport\s+dari\s+file\s+rekap\s+stok\s+csv/i.test(p.description) || /koleksi\s+busana/i.test(p.description) || /stz\s+fashion/i.test(p.description))) {
-            p.description = '';
-            modified = true;
-          }
-        }
-        if (modified) {
-          saveInventory();
-        }
       } else {
         products = [];
         saveInventory();
@@ -197,6 +187,7 @@ function loadData() {
   } catch (err) {
     console.error('Error loading inventory file:', err);
     products = [];
+    saveInventory();
   }
 
   try {
@@ -678,15 +669,15 @@ app.post('/api/products', (req, res) => {
 
   const newProduct: Product = {
     id,
-    sku: typeof body.sku === 'string' ? body.sku.trim() : '',
+    sku: '',
     name: body.name || 'Produk Baru',
     category: body.category || 'Umum',
     description: (body.description && !/di+mport\s+dari\s+file\s+rekap\s+stok\s+csv/i.test(body.description)) ? body.description.trim() : '',
     imageUrl: body.imageUrl || '/assets/aistudio/WhatsApp_Image_2026-10-20_at_14.00.08_44e1b065.jpeg',
-    location: body.location || 'Gudang Utama',
+    location: '',
     variants: (body.variants || []).map((v: any, index: number) => ({
       id: v.id || `var-${id}-${index + 1}`,
-      sku: typeof v.sku === 'string' ? v.sku.trim() : '',
+      sku: '',
       size: v.size || 'All Size',
       color: v.color || 'Standar',
       colorHex: v.colorHex || '#CBD5E1',
@@ -755,7 +746,7 @@ app.put('/api/products/:id', (req, res) => {
 
   const updatedVariants = Array.isArray(body.variants) ? body.variants.map((v: any, index: number) => ({
     id: v.id || `var-${id}-${index + 1}`,
-    sku: v.sku !== undefined ? (typeof v.sku === 'string' ? v.sku.trim() : '') : (existingProduct.sku || ''),
+    sku: '',
     size: v.size || 'All Size',
     color: v.color || 'Standar',
     colorHex: v.colorHex || '#CBD5E1',
@@ -770,14 +761,14 @@ app.put('/api/products/:id', (req, res) => {
 
   const updatedProduct: Product = {
     ...existingProduct,
-    sku: body.sku !== undefined ? (typeof body.sku === 'string' ? body.sku.trim() : '') : existingProduct.sku,
+    sku: '',
     name: (typeof body.name === 'string' && body.name.trim()) ? body.name.trim() : existingProduct.name,
     category: (typeof body.category === 'string' && body.category.trim()) ? body.category.trim() : existingProduct.category,
     description: body.description !== undefined 
       ? ((body.description && !/di+mport\s+dari\s+file\s+rekap\s+stok\s+csv/i.test(body.description)) ? body.description.trim() : '')
       : ((existingProduct.description && !/di+mport\s+dari\s+file\s+rekap\s+stok\s+csv/i.test(existingProduct.description)) ? existingProduct.description : ''),
     imageUrl: (typeof body.imageUrl === 'string' && body.imageUrl.trim()) ? body.imageUrl.trim() : existingProduct.imageUrl,
-    location: body.location !== undefined ? (typeof body.location === 'string' ? body.location.trim() : '') : existingProduct.location,
+    location: '',
     variants: updatedVariants,
     totalStock,
     updatedAt: new Date().toISOString(),

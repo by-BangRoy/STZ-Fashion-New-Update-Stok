@@ -159,7 +159,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         } catch (e) {}
       }
     }
-    return [];
+    return INITIAL_PRODUCTS;
   });
 
   const [stockLogs, setStockLogs] = useState<StockLog[]>(() => {
@@ -935,7 +935,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const gentleSanitySync = setInterval(() => {
       refreshData();
-    }, 25000);
+    }, 8000);
 
     // Auto-reconnect & resync immediately when user wakes up screen, unlocks phone, or refocuses tab
     const handleWakeOrFocus = () => {
@@ -985,17 +985,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               }
             }
           } else {
-            // Firestore has no products yet
-            setProducts((current) => {
-              return current;
-            });
+            // Firestore has no products yet - ensure catalog is empty
+            setProducts([]);
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.removeItem('stz_saved_products');
+              } catch (e) {}
+            }
           }
         }, (err) => {
-          if (err?.code === 'permission-denied') {
-            handleFirestoreError(err, OperationType.GET, PRODUCTS_COLLECTION);
-          } else {
-            console.warn('[Firestore] Products real-time listener:', err);
-          }
+          console.warn('[Firestore] Products real-time listener notice:', err?.message || err);
         });
 
         // 2. Real-time Firestore Logs sync

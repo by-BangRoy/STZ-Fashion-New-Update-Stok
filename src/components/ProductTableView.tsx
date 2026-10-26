@@ -40,7 +40,7 @@ export const ProductTableView: React.FC<ProductTableViewProps> = ({
           <thead className="bg-yellow-50/80 border-b border-yellow-200 text-slate-700 uppercase tracking-wider font-bold text-[11px]">
             <tr>
               <th className="py-3 px-3 sm:px-4">Barang</th>
-              <th className="py-3 px-3 sm:px-4">Kategori & SKU</th>
+              <th className="py-3 px-3 sm:px-4">Kategori</th>
               <th className="py-3 px-3 sm:px-4">Lokasi Rak</th>
               <th className="py-3 px-3 sm:px-4 min-w-[260px]">Varian & Stok Fisik (Per Pcs)</th>
               <th className="py-3 px-3 sm:px-4 whitespace-nowrap">Total Stok</th>
@@ -92,15 +92,12 @@ export const ProductTableView: React.FC<ProductTableViewProps> = ({
                     </div>
                   </td>
 
-                  {/* Category & optional SKU */}
+                  {/* Category */}
                   <td className="py-3.5 px-4 whitespace-nowrap">
                     {product.category && (
                       <span className="inline-block text-[11px] font-bold bg-amber-100 text-amber-950 px-2.5 py-0.5 rounded-lg border border-amber-200/80">
                         {product.category}
                       </span>
-                    )}
-                    {product.sku && product.sku.trim() !== '' && (
-                      <div className="font-mono text-[10px] text-slate-500 mt-1 font-semibold">{product.sku}</div>
                     )}
                   </td>
 

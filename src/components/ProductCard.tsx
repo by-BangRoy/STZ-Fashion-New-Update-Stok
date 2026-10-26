@@ -70,11 +70,6 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
         {/* Top Badges */}
         <div className="absolute top-2 left-2 flex flex-wrap gap-1 items-center">
-          {product.sku && product.sku.trim() !== '' && (
-            <span className="text-[10px] font-extrabold tracking-wider bg-slate-900/85 backdrop-blur-md text-amber-300 px-2 py-0.5 rounded-md shadow-sm">
-              {product.sku}
-            </span>
-          )}
           {product.category && product.category.trim() !== '' && (
             <span className="text-[10px] font-bold bg-amber-400 text-slate-950 px-2 py-0.5 rounded-md shadow-sm">
               {product.category}

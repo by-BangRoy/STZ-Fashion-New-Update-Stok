@@ -143,15 +143,10 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
 
   // Determine URLs for multi-device access
   const getPublicShareUrl = (): string => {
-    if (typeof window === 'undefined') return 'https://stz-fashion-stok.ai.studio';
+    if (typeof window === 'undefined') return '';
     try {
       const origin = window.location.origin;
       const pathname = window.location.pathname || '/';
-      // In Google Cloud Run / AI Studio, ais-dev-* requires developer Google account auth (causes 403 for other devices).
-      // ais-pre-* is the publicly shared preview URL designed for all devices.
-      if (origin && origin.includes('ais-dev-')) {
-        return `${origin.replace('ais-dev-', 'ais-pre-')}${pathname}`;
-      }
       return `${origin}${pathname}`;
     } catch {
       return window.location.href;
@@ -170,8 +165,11 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
   const publicUrl = getPublicShareUrl();
   const devUrl = getDirectDevUrl();
 
-  // Active URL automatically uses public preview URL (or direct dev fallback) to avoid 403 Google Auth errors
+  // Active URL points directly to the working live application so QR code & links never fail
   const activeUrl = useMemo(() => {
+    if (typeof window !== 'undefined') {
+      return `${window.location.origin}${window.location.pathname || '/'}`;
+    }
     return publicUrl || devUrl;
   }, [publicUrl, devUrl]);
 

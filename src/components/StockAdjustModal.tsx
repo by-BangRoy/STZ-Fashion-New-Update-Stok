@@ -269,13 +269,7 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
                   <span className="bg-amber-400/20 px-1.5 py-0.5 rounded text-amber-300 border border-amber-400/30">
                     {activeProduct.category || 'Umum'}
                   </span>
-                  {activeProduct.sku && activeProduct.sku.trim() !== '' && (
-                    <>
-                      <span>•</span>
-                      <span className="font-mono text-slate-300">{activeProduct.sku}</span>
-                    </>
-                  )}
-                  {activeProduct.location && (
+                  {activeProduct.location && activeProduct.location.trim() !== '' && (
                     <>
                       <span>•</span>
                       <span className="text-slate-300 flex items-center gap-0.5">
