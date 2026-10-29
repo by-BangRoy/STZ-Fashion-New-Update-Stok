@@ -211,137 +211,14 @@ export function exportAuditLogsToCSV(logs: StockLog[]) {
   URL.revokeObjectURL(url);
 }
 
+import { parseDelimitedText } from './fileImport.ts';
+
 /**
-/**
- * Parses inventory CSV text (supporting both flat tabular export and hierarchical Excel sheets)
+ * Parses inventory CSV / text (supporting both flat tabular export and hierarchical Excel sheets)
  * and returns structured Product payloads
  */
 export function parseInventoryCSV(csvText: string): Partial<Product>[] {
-  const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  if (lines.length < 2) return [];
-
-  // Search for the actual header line
-  let headerIndex = -1;
-  let headers: string[] = [];
-
-  const isProductHeader = (h: string) => {
-    if (!h || h.length > 35) return false;
-    return /^(no|sku|kode|nama|barang|nama barang|sku \/ kode|produk|pakaian)$/i.test(h) ||
-           /(?:^|\s)(sku|kode|nama barang|produk|pakaian)(?:\s|$|\/)/i.test(h);
-  };
-
-  const isVariantHeader = (h: string) => {
-    if (!h || h.length > 35) return false;
-    return /^(warna|color|size|ukuran|jumlah|pcs|stok|stok \(pcs\)|qty)$/i.test(h) ||
-           /(?:^|\s)(warna|color|size|ukuran|jumlah|pcs|stok|qty)(?:\s|$)/i.test(h);
-  };
-
-  for (let i = 0; i < Math.min(10, lines.length); i++) {
-    const rawLine = lines[i].replace(/^\uFEFF/, '');
-    const parsed = parseCSVLine(rawLine).map(h => h.toLowerCase().trim());
-    if (parsed.filter(Boolean).length < 3) continue;
-
-    const hasProductCol = parsed.some(isProductHeader);
-    const hasVariantCol = parsed.some(isVariantHeader);
-    
-    if (hasProductCol && hasVariantCol) {
-      headerIndex = i;
-      headers = parsed;
-      break;
-    }
-  }
-
-  // Fallback to line 0 if not detected
-  if (headerIndex === -1) {
-    headerIndex = 0;
-    headers = parseCSVLine(lines[0].replace(/^\uFEFF/, '')).map(h => h.toLowerCase().trim());
-  }
-
-  const idxName = headers.findIndex(h => h === 'sku / kode' || h === 'sku' || h === 'kode' || h === 'nama barang' || (h.includes('nama') && !h.includes('kasir') && !h.includes('operator')) || h.includes('barang'));
-  const idxColor = headers.findIndex(h => h.includes('warna') || h.includes('color'));
-  const idxSize = headers.findIndex(h => h.includes('size') || h.includes('ukuran'));
-  let idxStock = headers.findIndex(h => h.includes('pcs') || h.includes('stok (pcs)') || h.includes('jumlah') || h.includes('stok') || h.includes('qty'));
-  const idxCategory = headers.findIndex(h => h.includes('kategori') || h.includes('category'));
-  const idxMinStock = headers.findIndex(h => h.includes('min') || h.includes('batas'));
-
-  // If next line has sub-headers (like PCS under JUMLAH)
-  if (headerIndex + 1 < lines.length) {
-    const subHeaders = parseCSVLine(lines[headerIndex + 1]).map(h => h.toLowerCase().trim());
-    const subPcs = subHeaders.findIndex(h => h === 'pcs');
-    if (subPcs !== -1) {
-      idxStock = subPcs;
-      headerIndex++;
-    }
-  }
-
-  // Group by product name, supporting hierarchy fill-down
-  const productMap = new Map<string, { category: string; variants: any[] }>();
-  let currentProductName = '';
-  let currentColor = 'Standar';
-
-  for (let i = headerIndex + 1; i < lines.length; i++) {
-    const cols = parseCSVLine(lines[i]);
-    if (cols.length === 0) continue;
-
-    const rawNameCol = idxName !== -1 && cols[idxName] ? cols[idxName].trim() : '';
-    if (rawNameCol && !/^total/i.test(rawNameCol) && !/^no$/i.test(rawNameCol)) {
-      currentProductName = rawNameCol;
-    }
-
-    if (!currentProductName) continue;
-
-    const rawColor = idxColor !== -1 && cols[idxColor] ? cols[idxColor].trim() : '';
-    if (rawColor) {
-      currentColor = rawColor;
-    }
-
-    const size = idxSize !== -1 && cols[idxSize] ? cols[idxSize].trim() : 'All Size';
-    if (!size && !rawColor && !rawNameCol) continue; // Skip completely blank cells
-
-    // Parse stock number (handles "20", "138", "=20+10", etc.)
-    let stock = 0;
-    if (idxStock !== -1 && cols[idxStock]) {
-      const cleanNum = cols[idxStock].replace(/[^0-9]/g, '');
-      stock = Math.max(0, parseInt(cleanNum, 10) || 0);
-    }
-
-    const minStock = idxMinStock !== -1 && cols[idxMinStock] 
-      ? Math.max(0, parseInt(cols[idxMinStock].replace(/[^0-9]/g, ''), 10) || 2) 
-      : 2;
-
-    const category = idxCategory !== -1 && cols[idxCategory] && cols[idxCategory].trim() 
-      ? cols[idxCategory].trim() 
-      : (currentProductName.toLowerCase().includes('rok') ? 'Rok Busana' : 'Celana & Kulot');
-
-    if (!productMap.has(currentProductName)) {
-      productMap.set(currentProductName, { category, variants: [] });
-    }
-
-    const item = productMap.get(currentProductName)!;
-    item.variants.push({
-      id: `var-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      size: size || 'All Size',
-      color: currentColor || 'Standar',
-      colorHex: getColorHex(currentColor),
-      stock,
-      minStock,
-      price: 0,
-      costPrice: 0,
-    });
-  }
-
-  const result: Partial<Product>[] = [];
-  for (const [name, data] of productMap.entries()) {
-    result.push({
-      name,
-      category: data.category,
-      imageUrl: '/assets/aistudio/WhatsApp_Image_2026-10-20_at_14.00.08_44e1b065.jpeg',
-      description: '',
-      variants: data.variants,
-    });
-  }
-
-  return result;
+  return parseDelimitedText(csvText);
 }
 
 function parseCSVLine(line: string): string[] {

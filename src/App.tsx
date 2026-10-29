@@ -13,7 +13,9 @@ import { StockOpnameModal } from './components/StockOpnameModal.tsx';
 import { SettingsModal } from './components/SettingsModal.tsx';
 import { PinLockScreen } from './components/PinLockScreen.tsx';
 import { RealtimeNotificationToasts } from './components/RealtimeNotificationToasts.tsx';
+import { UniversalImportModal } from './components/UniversalImportModal.tsx';
 import { exportInventoryToCSV, parseInventoryCSV } from './utils/csvExport.ts';
+import { parseUniversalFile } from './utils/fileImport.ts';
 import { 
   Search, 
   LayoutGrid, 
@@ -42,6 +44,7 @@ function DashboardView() {
     lockApp,
     resetDemoData,
     createProduct,
+    batchImportProducts,
     refreshData,
     isRefreshing,
     addNotificationToast
@@ -104,6 +107,7 @@ function DashboardView() {
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
   const [isOpnameModalOpen, setIsOpnameModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isUniversalImportOpen, setIsUniversalImportOpen] = useState(false);
 
   // File import ref & state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -179,41 +183,29 @@ function DashboardView() {
     if (!file) return;
     setIsImporting(true);
     try {
-      const text = await file.text();
-      const parsed = parseInventoryCSV(text);
+      const parsed = await parseUniversalFile(file);
       if (parsed.length === 0) {
         addNotificationToast({
-          title: 'Format CSV Tidak Terbaca',
-          message: 'Pastikan file CSV memiliki kolom Nama Barang/Pakaian, Warna, Ukuran, dan Stok.',
+          title: 'Format Berkas Tidak Terbaca',
+          message: 'Pastikan file Excel/CSV memiliki kolom nama barang dan stok fisik.',
           type: 'danger',
-          deviceName: 'Sistem CSV',
+          deviceName: 'Sistem Impor',
           operatorName: 'Impor',
           isRemote: false,
-          productName: 'Impor CSV'
+          productName: file.name
         });
         return;
       }
-      for (const p of parsed) {
-        await createProduct(p);
-      }
-      addNotificationToast({
-        title: '✓ Berhasil Mengimpor CSV',
-        message: `Berhasil menambahkan ${parsed.length} model barang ke dalam katalog stok!`,
-        type: 'restock',
-        deviceName: 'Sistem CSV',
-        operatorName: 'Impor',
-        isRemote: false,
-        productName: 'Katalog Stok'
-      });
+      await batchImportProducts(parsed, false, file.name);
     } catch (err: any) {
       addNotificationToast({
-        title: 'Gagal Mengimpor CSV',
+        title: 'Gagal Membaca Berkas',
         message: err?.message || 'Terjadi kesalahan saat memproses file.',
         type: 'danger',
-        deviceName: 'Sistem CSV',
+        deviceName: 'Sistem Impor',
         operatorName: 'Impor',
         isRemote: false,
-        productName: 'Impor CSV'
+        productName: file.name
       });
     } finally {
       setIsImporting(false);
@@ -440,21 +432,21 @@ function DashboardView() {
                 <span>Ekspor CSV</span>
               </button>
 
-              {/* Impor CSV Button */}
+              {/* Impor Semua File Button */}
               <button
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => setIsUniversalImportOpen(true)}
                 disabled={isImporting}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 sm:py-2 bg-yellow-100/90 hover:bg-yellow-200 active:bg-yellow-300 border border-yellow-300 text-amber-950 rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95 shrink-0"
-                title="Impor Data dari File CSV"
+                title="Impor Data dari Semua File (Excel .xlsx, .xls, CSV, TSV, TXT, JSON)"
               >
                 <Upload className="w-3.5 h-3.5 text-amber-800" />
-                <span>{isImporting ? 'Mengimpor...' : 'Impor CSV'}</span>
+                <span>{isImporting ? 'Mengimpor...' : 'Impor File Stok'}</span>
               </button>
 
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv,text/csv"
+                accept="*/*, .xlsx, .xls, .csv, .tsv, .txt, .json"
                 onChange={handleFileUpload}
                 className="hidden"
               />
@@ -607,13 +599,20 @@ function DashboardView() {
             <p className="text-xs sm:text-sm text-slate-500 mt-2 max-w-md mx-auto leading-relaxed">
               Mulai kelola stok tokomu dengan menambahkan barang pertama. Seluruh perubahan stok fisik akan langsung tersinkron otomatis real-time ke semua HP dan komputer kasir.
             </p>
-            <div className="mt-6 flex justify-center items-center">
+            <div className="mt-6 flex flex-wrap justify-center items-center gap-3">
               <button
                 onClick={handleOpenAdd}
-                className="px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs sm:text-sm font-extrabold rounded-xl transition-all shadow-md shadow-amber-500/25 flex items-center gap-2 active:scale-95"
+                className="px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs sm:text-sm font-extrabold rounded-xl transition-all shadow-md shadow-amber-500/25 flex items-center gap-2 active:scale-95"
               >
                 <Plus className="w-4 h-4 stroke-[3]" />
                 <span>+ Tambah Barang Manual</span>
+              </button>
+              <button
+                onClick={() => setIsUniversalImportOpen(true)}
+                className="px-5 py-3 bg-yellow-100 hover:bg-yellow-200 border border-yellow-300 text-amber-950 text-xs sm:text-sm font-extrabold rounded-xl transition-all shadow-xs flex items-center gap-2 active:scale-95"
+              >
+                <Upload className="w-4 h-4 text-amber-800" />
+                <span>📥 Impor Semua File (Excel / CSV / TXT)</span>
               </button>
             </div>
           </div>

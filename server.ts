@@ -304,9 +304,10 @@ app.post('/api/inventory/save-csv', (req, res) => {
 });
 
 app.get('/api/logs', (req, res) => {
-  const limit = Number(req.query.limit) || 100;
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const logsToSend = limit && !isNaN(limit) ? stockLogs.slice(0, limit) : stockLogs;
   res.json({
-    logs: stockLogs.slice(0, limit),
+    logs: logsToSend,
     totalLogs: stockLogs.length,
   });
 });
@@ -578,6 +579,129 @@ app.post('/api/products', (req, res) => {
   return res.status(201).json({ success: true, product: newProduct });
 });
 
+// Batch import products from any file (XLSX, XLS, CSV, TSV, TXT, JSON, etc.)
+app.post('/api/products/batch-import', (req, res) => {
+  const { 
+    items, 
+    replaceAll = false, 
+    sourceFileName = 'Berkas Impor',
+    deviceId = 'web', 
+    deviceName = 'Web App', 
+    operatorName = 'Admin' 
+  } = req.body;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Array produk impor kosong atau tidak valid' });
+  }
+
+  const timestamp = new Date().toISOString();
+  const createdProducts: Product[] = [];
+  let totalImportedUnits = 0;
+
+  for (let i = 0; i < items.length; i++) {
+    const raw = items[i];
+    if (!raw || (!raw.name && !raw.sku)) continue;
+
+    const id = `prod-${Date.now()}-${i + 1}-${Math.random().toString(36).substring(2, 6)}`;
+    const variants = (raw.variants || []).map((v: any, vIdx: number) => ({
+      id: v.id || `var-${id}-${vIdx + 1}`,
+      sku: typeof v.sku === 'string' ? v.sku.trim() : '',
+      size: String(v.size || 'All Size').trim(),
+      color: String(v.color || 'Standar').trim(),
+      colorHex: v.colorHex || '#CBD5E1',
+      stock: Math.max(0, Number(v.stock) || 0),
+      minStock: Math.max(0, Number(v.minStock) || 2),
+      price: Math.max(0, Number(v.price) || 0),
+      costPrice: Math.max(0, Number(v.costPrice) || 0),
+      barcode: v.barcode || '',
+    }));
+
+    const prodStock = variants.reduce((sum: number, v: any) => sum + v.stock, 0);
+    totalImportedUnits += prodStock;
+
+    const newProd: Product = {
+      id,
+      sku: typeof raw.sku === 'string' ? raw.sku.trim() : '',
+      name: String(raw.name || `Barang #${i + 1}`).trim(),
+      category: String(raw.category || 'Pakaian Busana').trim(),
+      description: raw.description ? String(raw.description).trim() : '',
+      imageUrl: raw.imageUrl || '/assets/aistudio/WhatsApp_Image_2026-10-20_at_14.00.08_44e1b065.jpeg',
+      location: String(raw.location || 'Gudang Utama').trim(),
+      variants,
+      totalStock: prodStock,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      lastUpdatedBy: { deviceId, deviceName, operatorName },
+    };
+
+    createdProducts.push(newProd);
+  }
+
+  if (createdProducts.length === 0) {
+    return res.status(400).json({ error: 'Tidak ada data produk valid yang berhasil diproses' });
+  }
+
+  if (replaceAll) {
+    products = createdProducts;
+  } else {
+    // Append or merge matching by name
+    const existingMap = new Map(products.map(p => [p.name.toLowerCase().trim(), p]));
+    for (const cp of createdProducts) {
+      const key = cp.name.toLowerCase().trim();
+      if (existingMap.has(key)) {
+        const old = existingMap.get(key)!;
+        cp.id = old.id;
+        const idx = products.findIndex(p => p.id === old.id);
+        if (idx !== -1) products[idx] = cp;
+      } else {
+        products.unshift(cp);
+      }
+    }
+  }
+
+  saveInventory();
+
+  // Create audit log for batch import
+  const batchLog: StockLog = {
+    id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    timestamp,
+    productId: 'all',
+    productName: `${createdProducts.length} Model Barang`,
+    variantId: 'all',
+    variantDescription: `${totalImportedUnits} pcs total stok fisik`,
+    changeType: 'restock',
+    delta: totalImportedUnits,
+    previousStock: 0,
+    newStock: totalImportedUnits,
+    reason: `Impor Stok Massal dari "${sourceFileName}" (${createdProducts.length} model barang)`,
+    deviceId,
+    deviceName,
+    operatorName,
+  };
+
+  stockLogs.unshift(batchLog);
+  saveLogs();
+
+  // Broadcast to all clients
+  broadcast({
+    type: 'INIT',
+    payload: {
+      products,
+      logs: stockLogs,
+      settings: appSettings,
+    },
+    meta: { deviceId, deviceName, operatorName, timestamp },
+  });
+
+  return res.status(200).json({
+    success: true,
+    count: createdProducts.length,
+    totalUnits: totalImportedUnits,
+    products,
+    log: batchLog,
+  });
+});
+
 // Update product
 app.put('/api/products/:id', (req, res) => {
   const { id } = req.params;
@@ -659,7 +783,6 @@ app.put('/api/products/:id', (req, res) => {
   };
 
   stockLogs.unshift(log);
-  if (stockLogs.length > 500) stockLogs.splice(500);
   saveLogs();
 
   broadcast({
@@ -964,7 +1087,7 @@ wss.on('connection', (ws: WebSocket, req) => {
     type: 'INIT',
     payload: {
       products,
-      logs: stockLogs.slice(0, 50),
+      logs: stockLogs,
       settings: appSettings,
       clientInfo: {
         assignedDeviceId: defaultClient.deviceId,

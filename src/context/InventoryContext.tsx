@@ -81,6 +81,11 @@ interface InventoryContextType {
     }>
   ) => Promise<boolean>;
   createProduct: (productData: Partial<Product>) => Promise<boolean>;
+  batchImportProducts: (
+    items: Partial<Product>[],
+    replaceAll?: boolean,
+    sourceFileName?: string
+  ) => Promise<{ success: boolean; count: number; totalUnits: number; error?: string }>;
   updateProduct: (id: string, productData: Partial<Product>) => Promise<boolean>;
   deleteProduct: (id: string) => Promise<boolean>;
   dismissToast: (id: string) => void;
@@ -358,7 +363,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     try {
       const [resInv, resLogs, resSettings, resDevices] = await Promise.all([
         fetch('/api/inventory').catch(() => null),
-        fetch('/api/logs?limit=50').catch(() => null),
+        fetch('/api/logs').catch(() => null),
         fetch('/api/settings').catch(() => null),
         fetch('/api/devices').catch(() => null),
       ]);
@@ -821,7 +826,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           });
         }
         if (Array.isArray(createdLogs)) {
-          setStockLogs(prev => [...createdLogs, ...prev].slice(0, 100));
+          setStockLogs(prev => [...createdLogs, ...prev]);
         }
 
         playChime('restock');
@@ -876,7 +881,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           });
         }
         if (log) {
-          setStockLogs(prev => [log, ...prev.filter(l => l.id !== log.id)].slice(0, 100));
+          setStockLogs(prev => [log, ...prev.filter(l => l.id !== log.id)]);
         }
         if (isRemote) {
           playChime('adjustment');
@@ -1025,8 +1030,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           console.warn('[Firestore] Products real-time listener notice:', err);
         });
 
-        // 2. Real-time Firestore Logs sync
-        const logsQ = query(collection(db, LOGS_COLLECTION), orderBy('timestamp', 'desc'), limit(50));
+        // 2. Real-time Firestore Logs sync (Unlimited real-time history)
+        const logsQ = query(collection(db, LOGS_COLLECTION), orderBy('timestamp', 'desc'));
         unsubLogs = onSnapshot(logsQ, (snapshot) => {
           const logList: StockLog[] = [];
           snapshot.forEach((d) => {
@@ -1385,7 +1390,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           batchSyncProductsToFirestore(data.affectedProducts, data.logs).catch((err) => console.warn('[Firestore] Batch sync notice:', err));
         }
         if (Array.isArray(data.logs)) {
-          setStockLogs(prev => [...data.logs, ...prev].slice(0, 100));
+          setStockLogs(prev => [...data.logs, ...prev]);
         }
         return true;
       }
@@ -1444,7 +1449,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           syncProductToFirestore(clonedProduct);
         }
         if (data.log) {
-          setStockLogs(prev => [data.log, ...prev].slice(0, 100));
+          setStockLogs(prev => [data.log, ...prev]);
           saveLogToFirestore(data.log);
         }
         return true;
@@ -1453,6 +1458,83 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } catch (err) {
       console.error('Error creating product:', err);
       return false;
+    }
+  };
+
+  const batchImportProducts = async (
+    items: Partial<Product>[],
+    replaceAll = false,
+    sourceFileName = 'Berkas Impor'
+  ): Promise<{ success: boolean; count: number; totalUnits: number; error?: string }> => {
+    try {
+      const response = await fetch('/api/products/batch-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items,
+          replaceAll,
+          sourceFileName,
+          deviceId: currentDevice.deviceId,
+          deviceName: currentDevice.deviceName,
+          operatorName: currentDevice.operatorName,
+        }),
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Gagal memproses impor berkas di server');
+      }
+
+      const data = await response.json();
+      if (Array.isArray(data.products)) {
+        setProducts(data.products);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('stz_saved_products', JSON.stringify(data.products));
+          } catch (e) {}
+        }
+      }
+      if (data.log) {
+        setStockLogs(prev => [data.log, ...prev]);
+        saveLogToFirestore(data.log).catch(() => {});
+      }
+      if (Array.isArray(data.products)) {
+        batchSyncProductsToFirestore(data.products, data.log ? [data.log] : undefined).catch(() => {});
+      }
+
+      playChime('restock');
+      addNotificationToast({
+        title: `📥 Berhasil Mengimpor ${data.count} Model Barang`,
+        message: `Total ${Number(data.totalUnits || 0).toLocaleString('id-ID')} unit stok fisik dari "${sourceFileName}" berhasil masuk katalog!`,
+        type: 'restock',
+        deviceName: currentDevice.deviceName,
+        operatorName: currentDevice.operatorName,
+        isRemote: false,
+        productName: 'Impor Berkas',
+      });
+
+      return {
+        success: true,
+        count: data.count || items.length,
+        totalUnits: data.totalUnits || 0,
+      };
+    } catch (err: any) {
+      console.error('Batch import error:', err);
+      addNotificationToast({
+        title: 'Gagal Mengimpor Berkas',
+        message: err?.message || 'Terjadi kesalahan saat memproses data.',
+        type: 'danger',
+        deviceName: currentDevice.deviceName,
+        operatorName: currentDevice.operatorName,
+        isRemote: false,
+        productName: 'Impor Berkas',
+      });
+      return {
+        success: false,
+        count: 0,
+        totalUnits: 0,
+        error: err?.message || 'Gagal mengimpor file',
+      };
     }
   };
 
@@ -1667,6 +1749,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         adjustStock,
         batchAdjustStock,
         createProduct,
+        batchImportProducts,
         updateProduct,
         deleteProduct,
         dismissToast,

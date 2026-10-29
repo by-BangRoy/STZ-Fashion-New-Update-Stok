@@ -24,6 +24,7 @@ interface AuditLogDrawerProps {
 export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({ isOpen, onClose }) => {
   const { stockLogs } = useInventory();
   const [filterType, setFilterType] = useState<string>('all');
+  const [timeRange, setTimeRange] = useState<'today' | 'all'>('today');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Lock body scroll when drawer is open
@@ -39,7 +40,28 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({ isOpen, onClose 
 
   if (!isOpen) return null;
 
+  const todayStr = new Date().toDateString();
+
+  const todayLogsTotal = stockLogs.filter(log => {
+    try {
+      return new Date(log.timestamp).toDateString() === todayStr;
+    } catch {
+      return false;
+    }
+  }).length;
+
   const filteredLogs = stockLogs.filter((log) => {
+    // Time range filter
+    if (timeRange === 'today') {
+      try {
+        if (new Date(log.timestamp).toDateString() !== todayStr) {
+          return false;
+        }
+      } catch {
+        return false;
+      }
+    }
+
     const matchesType = filterType === 'all' || log.changeType === filterType;
     const matchesSearch =
       searchQuery === '' ||
@@ -128,16 +150,64 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({ isOpen, onClose 
           </div>
         </div>
 
+        {/* Scope Banner: Tanpa Batas */}
+        <div className="px-4 py-2.5 bg-amber-500/10 border-b border-amber-200/80 flex items-center justify-between text-xs text-amber-950">
+          <div className="flex items-center gap-2 font-semibold">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Ruang Aktivitas Tanpa Batas:</span>
+            <span className="font-extrabold text-amber-900">
+              {todayLogsTotal} tercatat hari ini • {stockLogs.length} total riwayat
+            </span>
+          </div>
+          <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-200/80 text-amber-950 px-2 py-0.5 rounded-md">
+            Real-time
+          </span>
+        </div>
+
         {/* Filters */}
         <div className="p-4 border-b border-slate-200 bg-slate-50 space-y-3">
+          {/* Time Range Toggle */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setTimeRange('today')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 ${
+                timeRange === 'today'
+                  ? 'bg-amber-500 text-slate-950 shadow-xs ring-1 ring-amber-400'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <span>Aktivitas Hari Ini (Tanpa Batas)</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                timeRange === 'today' ? 'bg-slate-950 text-white' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {todayLogsTotal}
+              </span>
+            </button>
+            <button
+              onClick={() => setTimeRange('all')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 ${
+                timeRange === 'all'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <span>Semua Riwayat Lengkap</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                timeRange === 'all' ? 'bg-amber-400 text-slate-950' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {stockLogs.length}
+              </span>
+            </button>
+          </div>
+
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Cari produk, perangkat, operator, atau nota..."
+              placeholder="Cari produk, varian, operator, alasan..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500"
+              className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
             />
           </div>
 
@@ -150,7 +220,7 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({ isOpen, onClose 
                   : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
               }`}
             >
-              Semua ({stockLogs.length})
+              Semua ({timeRange === 'today' ? todayLogsTotal : stockLogs.length})
             </button>
             <button
               onClick={() => setFilterType('sale')}

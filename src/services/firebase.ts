@@ -159,27 +159,33 @@ export async function saveSettingsToFirestore(settings: AppSettings): Promise<vo
 }
 
 /**
- * Batch update multiple products (Opname / batch)
+ * Batch update multiple products & logs with auto-chunking (supports unlimited items)
  */
 export async function batchSyncProductsToFirestore(products: Product[], logs?: StockLog[]): Promise<void> {
   const path = PRODUCTS_COLLECTION;
   try {
     await ensureFirebaseAuth();
-    const batch = writeBatch(db);
     
+    // Combine operations into chunked batches of 400
+    const ops: Array<{ ref: any; data: any }> = [];
     for (const p of products) {
-      const ref = doc(db, PRODUCTS_COLLECTION, p.id);
-      batch.set(ref, p, { merge: true });
+      ops.push({ ref: doc(db, PRODUCTS_COLLECTION, p.id), data: p });
     }
-
     if (logs && logs.length > 0) {
       for (const l of logs) {
-        const lRef = doc(db, LOGS_COLLECTION, l.id);
-        batch.set(lRef, l, { merge: true });
+        ops.push({ ref: doc(db, LOGS_COLLECTION, l.id), data: l });
       }
     }
 
-    await batch.commit();
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < ops.length; i += CHUNK_SIZE) {
+      const chunk = ops.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const op of chunk) {
+        batch.set(op.ref, op.data, { merge: true });
+      }
+      await batch.commit();
+    }
   } catch (err: any) {
     if (err?.code === 'permission-denied' || (err instanceof Error && err.message.includes('insufficient permissions'))) {
       handleFirestoreError(err, OperationType.WRITE, path);
