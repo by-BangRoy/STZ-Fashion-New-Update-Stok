@@ -1,4 +1,4 @@
-import { Product, StockLog } from '../types/inventory.ts';
+import type { Product, StockLog } from '../types/inventory.ts';
 
 /**
  * Escapes cell content for RFC 4180 CSV standard
@@ -334,12 +334,10 @@ export function parseInventoryCSV(csvText: string): Partial<Product>[] {
   for (const [name, data] of productMap.entries()) {
     result.push({
       name,
-      sku: '',
-      location: '',
       category: data.category,
       imageUrl: '/assets/aistudio/WhatsApp_Image_2026-10-20_at_14.00.08_44e1b065.jpeg',
       description: '',
-      variants: data.variants.map((v) => ({ ...v, sku: '' })),
+      variants: data.variants,
     });
   }
 

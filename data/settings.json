@@ -1,14 +1,14 @@
 {
   "securityPin": "000000",
-  "pinRequired": true,
+  "pinRequired": false,
   "autoLockMinutes": 0,
   "soundEnabled": true,
   "defaultMinStockAlert": 3,
   "enableStockNotifications": true,
   "profile": {
-    "storeName": "",
+    "storeName": "STZ Stok",
     "storeBranch": "",
-    "tagline": "",
+    "tagline": "Rekap Barang Keluar / Masuk",
     "phone": "",
     "address": "",
     "ownerName": "",

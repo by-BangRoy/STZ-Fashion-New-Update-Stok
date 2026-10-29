@@ -40,7 +40,7 @@ export const ProductTableView: React.FC<ProductTableViewProps> = ({
           <thead className="bg-yellow-50/80 border-b border-yellow-200 text-slate-700 uppercase tracking-wider font-bold text-[11px]">
             <tr>
               <th className="py-3 px-3 sm:px-4">Barang</th>
-              <th className="py-3 px-3 sm:px-4">Kategori</th>
+              <th className="py-3 px-3 sm:px-4">Kategori & SKU</th>
               <th className="py-3 px-3 sm:px-4">Lokasi Rak</th>
               <th className="py-3 px-3 sm:px-4 min-w-[260px]">Varian & Stok Fisik (Per Pcs)</th>
               <th className="py-3 px-3 sm:px-4 whitespace-nowrap">Total Stok</th>
@@ -92,12 +92,15 @@ export const ProductTableView: React.FC<ProductTableViewProps> = ({
                     </div>
                   </td>
 
-                  {/* Category */}
+                  {/* Category & optional SKU */}
                   <td className="py-3.5 px-4 whitespace-nowrap">
                     {product.category && (
                       <span className="inline-block text-[11px] font-bold bg-amber-100 text-amber-950 px-2.5 py-0.5 rounded-lg border border-amber-200/80">
                         {product.category}
                       </span>
+                    )}
+                    {product.sku && product.sku.trim() !== '' && (
+                      <div className="font-mono text-[10px] text-slate-500 mt-1 font-semibold">{product.sku}</div>
                     )}
                   </td>
 
@@ -126,13 +129,14 @@ export const ProductTableView: React.FC<ProductTableViewProps> = ({
                           <div
                             key={variant.id}
                             onClick={() => onOpenAdjust(product, variant.id)}
-                            title={`Klik untuk ubah stok varian ${variant.size} - ${variant.color}`}
+                            role="button"
+                            title={`Sentuh untuk ubah stok ${variant.size} (${variant.color})`}
                             className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs shadow-xs transition-all cursor-pointer hover:shadow-md hover:scale-[1.02] active:scale-95 ${
                               vOut
                                 ? 'bg-rose-50 border-rose-400 text-rose-950 font-bold ring-2 ring-rose-400/50 hover:bg-rose-100'
                                 : vLow
                                 ? 'bg-amber-50 border-amber-400 text-amber-950 font-bold ring-1 ring-amber-400/40 hover:bg-amber-100'
-                                : 'bg-emerald-50/60 border-emerald-200/90 text-emerald-950 hover:bg-emerald-100/80'
+                                : 'bg-emerald-50/60 border-emerald-200/90 text-emerald-950 hover:bg-emerald-100'
                             }`}
                           >
                             {/* Color chip */}
@@ -218,7 +222,14 @@ export const ProductTableView: React.FC<ProductTableViewProps> = ({
                   <td className="py-3.5 px-4 whitespace-nowrap text-right">
                     <div className="flex items-center justify-end gap-1.5">
                       <button
-                        onClick={() => onOpenAdjust(product)}
+                        onClick={() => {
+                          const targetVar = filterStatus === 'out'
+                            ? (variantsList.find((v) => Number(v.stock) <= 0) || variantsList[0])
+                            : filterStatus === 'low'
+                            ? (variantsList.find((v) => Number(v.stock) > 0 && Number(v.stock) <= (Number(v.minStock) || defaultMin)) || variantsList[0])
+                            : (variantsList.find((v) => Number(v.stock) <= 0) || variantsList.find((v) => Number(v.stock) <= (Number(v.minStock) || defaultMin)) || variantsList[0]);
+                          onOpenAdjust(product, targetVar?.id);
+                        }}
                         className="px-2.5 py-1.5 bg-slate-900 hover:bg-amber-500 hover:text-slate-950 text-white rounded-xl text-xs font-extrabold transition-colors flex items-center gap-1 shadow-sm active:scale-95"
                         title="Kelola & Ubah Stok"
                       >

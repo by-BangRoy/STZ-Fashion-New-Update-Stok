@@ -1,31 +1,65 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Product } from '../types/inventory.ts';
 import { useInventory } from '../context/InventoryContext.tsx';
 import { formatLusin } from '../utils/formatters.ts';
 import { 
   MapPin, 
   AlertTriangle, 
-  AlertOctagon,
+  AlertOctagon, 
   Edit3, 
-  SlidersHorizontal
+  SlidersHorizontal,
+  Plus,
+  Minus
 } from 'lucide-react';
 
 interface ProductCardProps {
   product: Product;
   onOpenAdjust: (product: Product, variantId?: string) => void;
   onOpenEdit: (product: Product) => void;
+  filterStatus?: string;
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({
   product,
   onOpenAdjust,
   onOpenEdit,
+  filterStatus,
 }) => {
-  const { settings } = useInventory();
+  const { settings, adjustStock } = useInventory();
   const defaultMin = settings.defaultMinStockAlert || 3;
   const variantsList = Array.isArray(product.variants) ? product.variants : [];
-  const defaultVar = variantsList.find((v) => Number(v.stock) <= 0) || variantsList[0];
+
+  const defaultVar = useMemo(() => {
+    if (filterStatus === 'low') {
+      const lowVar = variantsList.find((v) => {
+        const s = Number(v.stock);
+        const m = Number(v.minStock) > 0 ? Number(v.minStock) : defaultMin;
+        return s > 0 && s <= m;
+      });
+      if (lowVar) return lowVar;
+    }
+    if (filterStatus === 'out') {
+      const outVar = variantsList.find((v) => Number(v.stock) <= 0);
+      if (outVar) return outVar;
+    }
+    const zeroVar = variantsList.find((v) => Number(v.stock) <= 0);
+    if (zeroVar) return zeroVar;
+    const lowVar = variantsList.find((v) => {
+      const s = Number(v.stock);
+      const m = Number(v.minStock) > 0 ? Number(v.minStock) : defaultMin;
+      return s > 0 && s <= m;
+    });
+    if (lowVar) return lowVar;
+    return variantsList[0];
+  }, [variantsList, filterStatus, defaultMin]);
+
   const [selectedVariantId, setSelectedVariantId] = useState<string>(defaultVar?.id || '');
+
+  useEffect(() => {
+    if (defaultVar?.id) {
+      setSelectedVariantId(defaultVar.id);
+    }
+  }, [defaultVar?.id, filterStatus]);
 
   const selectedVariant = variantsList.find((v) => v.id === selectedVariantId) || variantsList[0];
 
@@ -39,17 +73,34 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   });
   const hasLowVariant = lowVariants.length > 0;
 
-  // Sort variants so out of stock (0 pcs) and low stock variants appear first
-  const sortedVariants = [...variantsList].sort((a, b) => {
-    const aOut = Number(a.stock) <= 0 ? 0 : 1;
-    const bOut = Number(b.stock) <= 0 ? 0 : 1;
-    if (aOut !== bOut) return aOut - bOut;
-    const aMin = Number(a.minStock) > 0 ? Number(a.minStock) : defaultMin;
-    const bMin = Number(b.minStock) > 0 ? Number(b.minStock) : defaultMin;
-    const aLow = Number(a.stock) <= aMin ? 0 : 1;
-    const bLow = Number(b.stock) <= bMin ? 0 : 1;
-    return aLow - bLow;
-  });
+  // Sort variants so relevant variants (based on filterStatus or critical stock) appear first
+  const sortedVariants = useMemo(() => {
+    return [...variantsList].sort((a, b) => {
+      const aStock = Number(a.stock);
+      const bStock = Number(b.stock);
+      const aMin = Number(a.minStock) > 0 ? Number(a.minStock) : defaultMin;
+      const bMin = Number(b.minStock) > 0 ? Number(b.minStock) : defaultMin;
+
+      if (filterStatus === 'low') {
+        const aIsLow = aStock > 0 && aStock <= aMin ? 0 : 1;
+        const bIsLow = bStock > 0 && bStock <= bMin ? 0 : 1;
+        if (aIsLow !== bIsLow) return aIsLow - bIsLow;
+      }
+      if (filterStatus === 'out') {
+        const aIsOut = aStock <= 0 ? 0 : 1;
+        const bIsOut = bStock <= 0 ? 0 : 1;
+        if (aIsOut !== bIsOut) return aIsOut - bIsOut;
+      }
+
+      const aOut = aStock <= 0 ? 0 : 1;
+      const bOut = bStock <= 0 ? 0 : 1;
+      if (aOut !== bOut) return aOut - bOut;
+
+      const aLow = aStock <= aMin ? 0 : 1;
+      const bLow = bStock <= bMin ? 0 : 1;
+      return aLow - bLow;
+    });
+  }, [variantsList, filterStatus, defaultMin]);
 
   return (
     <div className="bg-white rounded-2xl border border-yellow-200/90 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden flex flex-col group">
@@ -70,6 +121,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
         {/* Top Badges */}
         <div className="absolute top-2 left-2 flex flex-wrap gap-1 items-center">
+          {product.sku && product.sku.trim() !== '' && (
+            <span className="text-[10px] font-extrabold tracking-wider bg-slate-900/85 backdrop-blur-md text-amber-300 px-2 py-0.5 rounded-md shadow-sm">
+              {product.sku}
+            </span>
+          )}
           {product.category && product.category.trim() !== '' && (
             <span className="text-[10px] font-bold bg-amber-400 text-slate-950 px-2 py-0.5 rounded-md shadow-sm">
               {product.category}
@@ -173,13 +229,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
                     <div className="flex items-center gap-1.5 shrink-0">
                       <span
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedVariantId(variant.id);
-                          onOpenAdjust(product, variant.id);
-                        }}
-                        title={`Ubah stok ${variant.size} - ${variant.color}`}
-                        className={`font-black text-xs px-2 py-0.5 rounded-md shadow-xs hover:scale-105 active:scale-95 transition-transform ${
+                        className={`font-black text-xs px-2 py-0.5 rounded-md shadow-xs ${
                           isOut
                             ? 'bg-rose-600 text-white'
                             : isLow
@@ -197,14 +247,43 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           </div>
         </div>
 
-        {/* Action Button */}
-        <div className="pt-2 border-t border-yellow-100 flex items-center gap-2">
+        {/* Action Button & Quick Direct Stock Step */}
+        <div className="pt-2 border-t border-yellow-100 flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (selectedVariant && selectedVariant.stock > 0) {
+                adjustStock(product.id, selectedVariant.id, -1, 'sale', 'Penjualan Cepat Kasir (-1)');
+              }
+            }}
+            disabled={!selectedVariant || selectedVariant.stock <= 0}
+            className="w-8 h-8 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center border border-rose-200 transition-all active:scale-90 shrink-0"
+            title={`Kurangi 1 pcs ${selectedVariant?.size || ''} (${selectedVariant?.color || ''})`}
+          >
+            <Minus className="w-3.5 h-3.5 stroke-[3]" />
+          </button>
+
           <button
             onClick={() => onOpenAdjust(product, selectedVariant?.id)}
-            className="flex-1 py-2 px-3 bg-slate-900 hover:bg-amber-500 hover:text-slate-950 text-white rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+            className="flex-1 py-2 px-2 bg-slate-900 hover:bg-amber-500 hover:text-slate-950 text-white rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95 min-w-0"
           >
-            <SlidersHorizontal className="w-3.5 h-3.5 text-amber-400 group-hover:text-slate-950" />
-            <span>Kelola & Ubah Stok</span>
+            <SlidersHorizontal className="w-3.5 h-3.5 text-amber-400 group-hover:text-slate-950 shrink-0" />
+            <span className="truncate">Kelola Stok</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (selectedVariant) {
+                adjustStock(product.id, selectedVariant.id, 1, 'restock', 'Restock Cepat (+1)');
+              }
+            }}
+            className="w-8 h-8 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 flex items-center justify-center border border-emerald-200 transition-all active:scale-90 shrink-0"
+            title={`Tambah 1 pcs ${selectedVariant?.size || ''} (${selectedVariant?.color || ''})`}
+          >
+            <Plus className="w-3.5 h-3.5 stroke-[3]" />
           </button>
         </div>
       </div>

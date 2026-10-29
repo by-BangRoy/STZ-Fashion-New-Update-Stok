@@ -24,7 +24,7 @@ if (!fs.existsSync(DATA_DIR)) {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   securityPin: '000000',
-  pinRequired: true,
+  pinRequired: false,
   autoLockMinutes: 0,
   soundEnabled: true,
   defaultMinStockAlert: 3,
@@ -45,129 +45,6 @@ let products: Product[] = [];
 let stockLogs: StockLog[] = [];
 let appSettings: AppSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
 
-// Helper to slugify string
-function slugify(text: string): string {
-  return text.toString().toLowerCase().trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^\w\-]+/g, '')
-    .replace(/\-\-+/g, '-');
-}
-
-// Helper to determine color hex
-function getColorHex(colorName: string): string {
-  const c = colorName.toLowerCase();
-  if (c.includes('hitam') || c.includes('black')) return '#1E293B';
-  if (c.includes('putih') || c.includes('white')) return '#F8FAFC';
-  if (c.includes('army') || c.includes('sage') || c.includes('green') || c.includes('hijau')) return '#4D7C0F';
-  if (c.includes('mocca') || c.includes('coklat') || c.includes('brown')) return '#A27B5C';
-  if (c.includes('cream') || c.includes('krem') || c.includes('beige')) return '#E2D4B7';
-  if (c.includes('navy') || c.includes('biru') || c.includes('blue')) return '#1E3A8A';
-  if (c.includes('abu') || c.includes('grey') || c.includes('gray')) return '#64748B';
-  if (c.includes('merah') || c.includes('maroon') || c.includes('red')) return '#991B1B';
-  if (c.includes('pink') || c.includes('dusty')) return '#F472B6';
-  if (c.includes('kuning') || c.includes('yellow') || c.includes('mustard')) return '#F59E0B';
-  return '#94A3B8';
-}
-
-function parseCSVLine(line: string): string[] {
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === ',' && !inQuotes) {
-      result.push(current);
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-  result.push(current);
-  return result;
-}
-
-function seedInventoryFromCSV(): boolean {
-  try {
-    const csvCandidates = [
-      path.join(__dirname, 'data', 'inventory_latest.csv'),
-      path.join(__dirname, 'public', 'assets', 'aistudio', 'STOK_STZ_FASHION_-_STOK_cf9c6d87.csv'),
-    ];
-    let csvPath = '';
-    for (const c of csvCandidates) {
-      if (fs.existsSync(c)) {
-        csvPath = c;
-        break;
-      }
-    }
-    if (!csvPath) return false;
-
-    const csv = fs.readFileSync(csvPath, 'utf8');
-    const lines = csv.split(/\r?\n/).filter(Boolean);
-    if (lines.length < 2) return false;
-
-    const productMap = new Map<string, Product>();
-
-    for (let i = 1; i < lines.length; i++) {
-      const cols = parseCSVLine(lines[i]);
-      if (cols.length < 6) continue;
-      const name = cols[1]?.trim();
-      if (!name) continue;
-      const category = cols[2]?.trim() || 'Pakaian';
-      const color = cols[3]?.trim() || 'Standar';
-      const size = cols[4]?.trim() || 'All Size';
-      const stock = parseInt(cols[5]?.replace(/[^0-9]/g, ''), 10) || 0;
-      const minStock = parseInt(cols[7]?.replace(/[^0-9]/g, ''), 10) || 2;
-
-      const prodId = 'prod-' + slugify(name);
-      if (!productMap.has(prodId)) {
-        productMap.set(prodId, {
-          id: prodId,
-          sku: 'STZ-' + slugify(name).toUpperCase().substring(0, 8),
-          name,
-          category,
-          location: 'Gudang Utama',
-          description: '',
-          imageUrl: '/assets/aistudio/WhatsApp_Image_2026-10-20_at_14.00.08_44e1b065.jpeg',
-          variants: [],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          totalStock: 0,
-        });
-      }
-
-      const p = productMap.get(prodId)!;
-      const varId = 'var-' + slugify(name) + '-' + slugify(color) + '-' + slugify(size);
-      p.variants.push({
-        id: varId,
-        sku: p.sku + '-' + slugify(color).toUpperCase().substring(0, 3) + '-' + size.toUpperCase(),
-        size,
-        color,
-        colorHex: getColorHex(color),
-        stock,
-        minStock,
-        price: 0,
-        costPrice: 0,
-      });
-      p.totalStock += stock;
-    }
-
-    products = Array.from(productMap.values());
-    saveInventory();
-    console.log(`[Auto-Seed] Successfully initialized ${products.length} products from CSV (${csvPath}).`);
-    return true;
-  } catch (err) {
-    console.error('Failed to seed inventory from CSV:', err);
-    return false;
-  }
-}
-
 // Load or initialize data
 function loadData() {
   try {
@@ -176,17 +53,27 @@ function loadData() {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         products = parsed;
+        let modified = false;
+        for (const p of products) {
+          if (p.description && (/di+mport\s+dari\s+file\s+rekap\s+stok\s+csv/i.test(p.description) || /koleksi\s+busana/i.test(p.description) || /stz\s+fashion/i.test(p.description))) {
+            p.description = '';
+            modified = true;
+          }
+        }
+        if (modified) {
+          saveInventory();
+        }
       } else {
-        products = [];
+        products = JSON.parse(JSON.stringify(INITIAL_PRODUCTS));
         saveInventory();
       }
     } else {
-      products = [];
+      products = JSON.parse(JSON.stringify(INITIAL_PRODUCTS));
       saveInventory();
     }
   } catch (err) {
     console.error('Error loading inventory file:', err);
-    products = [];
+    products = JSON.parse(JSON.stringify(INITIAL_PRODUCTS));
     saveInventory();
   }
 
@@ -211,7 +98,7 @@ function loadData() {
         ...DEFAULT_SETTINGS,
         ...loaded,
         securityPin: loaded.securityPin || '000000',
-        pinRequired: true,
+        pinRequired: Boolean(loaded.pinRequired),
         profile: {
           ...DEFAULT_SETTINGS.profile,
           ...(loaded.profile || {}),
@@ -463,52 +350,30 @@ app.post('/api/stock/adjust', (req, res) => {
     delta, // number: +x or -x
     changeType = 'adjustment',
     reason = '',
-    product: incomingProduct,
-    productName: incomingProductName,
-    variantSize,
-    variantColor,
     deviceId = 'unknown-device',
     deviceName = 'Perangkat Tidak Dikenal',
     operatorName = 'Staf Toko',
-  } = req.body || {};
+  } = req.body;
 
-  const numDelta = typeof delta === 'number' ? delta : (Number(delta) || 0);
-
-  if (!productId || !variantId) {
-    return res.status(400).json({ error: 'Parameter productId dan variantId harus valid' });
+  if (!productId || !variantId || typeof delta !== 'number') {
+    return res.status(400).json({ error: 'Parameter productId, variantId, dan delta harus valid' });
   }
 
-  let product = products.find(p => p.id === productId);
-  if (!product && incomingProductName) {
-    product = products.find(p => p.name.toLowerCase() === String(incomingProductName).toLowerCase());
-  }
-  if (!product && incomingProduct && (incomingProduct as Product).id) {
-    product = incomingProduct as Product;
-    products.push(product);
-  }
-
+  const product = products.find(p => p.id === productId);
   if (!product) {
-    return res.status(404).json({ error: 'Produk tidak ditemukan di sistem' });
+    return res.status(404).json({ error: 'Produk tidak ditemukan' });
   }
 
-  let variant = product.variants.find(v => v.id === variantId);
-  if (!variant && variantSize && variantColor) {
-    variant = product.variants.find(v =>
-      v.size.toLowerCase() === String(variantSize).toLowerCase() &&
-      v.color.toLowerCase() === String(variantColor).toLowerCase()
-    );
-  }
-  if (!variant && product.variants.length > 0) {
-    variant = product.variants[0];
-  }
-
+  const variant = product.variants.find(v => v.id === variantId);
   if (!variant) {
-    return res.status(404).json({ error: 'Varian tidak ditemukan di sistem' });
+    return res.status(404).json({ error: 'Varian tidak ditemukan' });
   }
 
   const previousStock = Number(variant.stock) || 0;
+  const numDelta = Number(delta) || 0;
   const newStock = Math.max(0, previousStock + numDelta);
   variant.stock = newStock;
+  const vMin = Number(variant.minStock) > 0 ? Number(variant.minStock) : 2;
 
   // Recalculate total product stock
   product.totalStock = product.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
@@ -541,10 +406,8 @@ app.post('/api/stock/adjust', (req, res) => {
   saveInventory();
   saveLogs();
 
-  const defaultMin = appSettings.defaultMinStockAlert || 3;
-  const minStockVal = Number(variant.minStock) > 0 ? Number(variant.minStock) : defaultMin;
-  const isOutOfStock = newStock === 0 || Number(product.totalStock) === 0;
-  const isLowStock = !isOutOfStock && newStock <= minStockVal;
+  const isOutOfStock = newStock === 0 || product.totalStock === 0;
+  const isLowStock = !isOutOfStock && newStock <= vMin;
 
   const realtimePayload: RealtimeMessage = {
     type: 'STOCK_UPDATED',
@@ -573,7 +436,7 @@ app.post('/api/stock/adjust', (req, res) => {
 
 // Batch adjust (e.g. Stock Opname or Multi-item Checkout)
 app.post('/api/stock/batch', (req, res) => {
-  const { items, deviceId = 'web', deviceName = 'Perangkat Web', operatorName = 'Staf' } = req.body || {};
+  const { items, deviceId = 'web', deviceName = 'Perangkat Web', operatorName = 'Staf' } = req.body;
 
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'Items array diperlukan' });
@@ -583,27 +446,14 @@ app.post('/api/stock/batch', (req, res) => {
   const createdLogs: StockLog[] = [];
 
   for (const item of items) {
-    const { productId, variantId, delta, changeType = 'adjustment', reason = '', productName, variantSize, variantColor } = item;
-    let product = products.find(p => p.id === productId);
-    if (!product && productName) {
-      product = products.find(p => p.name.toLowerCase() === String(productName).toLowerCase());
-    }
+    const { productId, variantId, delta, changeType = 'adjustment', reason = '' } = item;
+    const product = products.find(p => p.id === productId);
     if (!product) continue;
-
-    let variant = product.variants.find(v => v.id === variantId);
-    if (!variant && variantSize && variantColor) {
-      variant = product.variants.find(v =>
-        v.size.toLowerCase() === String(variantSize).toLowerCase() &&
-        v.color.toLowerCase() === String(variantColor).toLowerCase()
-      );
-    }
-    if (!variant && product.variants.length > 0) {
-      variant = product.variants[0];
-    }
+    const variant = product.variants.find(v => v.id === variantId);
     if (!variant) continue;
 
-    const numDelta = typeof delta === 'number' ? delta : (Number(delta) || 0);
     const previousStock = Number(variant.stock) || 0;
+    const numDelta = typeof delta === 'number' ? delta : Number(delta) || 0;
     const newStock = Math.max(0, previousStock + numDelta);
     variant.stock = newStock;
     product.totalStock = product.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
@@ -618,7 +468,7 @@ app.post('/api/stock/batch', (req, res) => {
       variantId: variant.id,
       variantDescription: `${variant.size} / ${variant.color}`,
       changeType,
-      delta: numDelta,
+      delta,
       previousStock,
       newStock,
       reason,
@@ -669,15 +519,15 @@ app.post('/api/products', (req, res) => {
 
   const newProduct: Product = {
     id,
-    sku: '',
+    sku: typeof body.sku === 'string' ? body.sku.trim() : '',
     name: body.name || 'Produk Baru',
     category: body.category || 'Umum',
     description: (body.description && !/di+mport\s+dari\s+file\s+rekap\s+stok\s+csv/i.test(body.description)) ? body.description.trim() : '',
     imageUrl: body.imageUrl || '/assets/aistudio/WhatsApp_Image_2026-10-20_at_14.00.08_44e1b065.jpeg',
-    location: '',
+    location: body.location || 'Gudang Utama',
     variants: (body.variants || []).map((v: any, index: number) => ({
       id: v.id || `var-${id}-${index + 1}`,
-      sku: '',
+      sku: typeof v.sku === 'string' ? v.sku.trim() : '',
       size: v.size || 'All Size',
       color: v.color || 'Standar',
       colorHex: v.colorHex || '#CBD5E1',
@@ -746,7 +596,7 @@ app.put('/api/products/:id', (req, res) => {
 
   const updatedVariants = Array.isArray(body.variants) ? body.variants.map((v: any, index: number) => ({
     id: v.id || `var-${id}-${index + 1}`,
-    sku: '',
+    sku: v.sku !== undefined ? (typeof v.sku === 'string' ? v.sku.trim() : '') : (existingProduct.sku || ''),
     size: v.size || 'All Size',
     color: v.color || 'Standar',
     colorHex: v.colorHex || '#CBD5E1',
@@ -761,14 +611,14 @@ app.put('/api/products/:id', (req, res) => {
 
   const updatedProduct: Product = {
     ...existingProduct,
-    sku: '',
+    sku: body.sku !== undefined ? (typeof body.sku === 'string' ? body.sku.trim() : '') : existingProduct.sku,
     name: (typeof body.name === 'string' && body.name.trim()) ? body.name.trim() : existingProduct.name,
     category: (typeof body.category === 'string' && body.category.trim()) ? body.category.trim() : existingProduct.category,
     description: body.description !== undefined 
       ? ((body.description && !/di+mport\s+dari\s+file\s+rekap\s+stok\s+csv/i.test(body.description)) ? body.description.trim() : '')
       : ((existingProduct.description && !/di+mport\s+dari\s+file\s+rekap\s+stok\s+csv/i.test(existingProduct.description)) ? existingProduct.description : ''),
     imageUrl: (typeof body.imageUrl === 'string' && body.imageUrl.trim()) ? body.imageUrl.trim() : existingProduct.imageUrl,
-    location: '',
+    location: body.location !== undefined ? (typeof body.location === 'string' ? body.location.trim() : '') : existingProduct.location,
     variants: updatedVariants,
     totalStock,
     updatedAt: new Date().toISOString(),

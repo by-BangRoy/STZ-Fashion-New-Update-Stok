@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { Product, ProductVariant, StockLog, RealtimeMessage, DeviceInfo, StockChangeType, AppSettings, DEFAULT_SETTINGS } from '../types/inventory.ts';
+import { Product, StockLog, RealtimeMessage, DeviceInfo, StockChangeType, AppSettings, DEFAULT_SETTINGS } from '../types/inventory.ts';
 import { INITIAL_PRODUCTS } from '../data/initialData.ts';
 import { playChime, isSoundEnabled, setSoundEnabled } from '../utils/audio.ts';
 import { parseDeviceUserAgent } from '../utils/deviceParser.ts';
@@ -16,6 +16,7 @@ import {
   saveSettingsToFirestore,
   batchSyncProductsToFirestore,
   clearAllProductsFromFirestore,
+  clearAllLogsFromFirestore,
   handleFirestoreError,
   OperationType
 } from '../services/firebase.ts';
@@ -146,6 +147,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Initialize with local cache or empty catalog
   const [products, setProducts] = useState<Product[]>(() => {
     if (typeof window !== 'undefined') {
+      if (!localStorage.getItem('stz_v3_clean_slate')) {
+        localStorage.removeItem('stz_saved_products');
+        localStorage.removeItem('stz_saved_logs');
+        localStorage.setItem('stz_v3_clean_slate', 'true');
+        return [];
+      }
       const saved = localStorage.getItem('stz_saved_products');
       if (saved) {
         try {
@@ -159,7 +166,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         } catch (e) {}
       }
     }
-    return INITIAL_PRODUCTS;
+    return [];
   });
 
   const [stockLogs, setStockLogs] = useState<StockLog[]>(() => {
@@ -195,7 +202,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const [connectedDevicesCount, setConnectedDevicesCount] = useState<number>(1);
   const [connectedDevices, setConnectedDevices] = useState<DeviceInfo[]>([]);
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connected');
   const [activeToasts, setActiveToasts] = useState<RealtimeToast[]>([]);
   const [currentDevice, setCurrentDevice] = useState(getInitialDeviceProfile);
   const currentDeviceRef = useRef(currentDevice);
@@ -234,6 +241,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const reconnectTimeoutRef = useRef<any>(null);
   const pingIntervalRef = useRef<any>(null);
   const reconnectAttemptsRef = useRef<number>(0);
+  const lastActivityRef = useRef<number>(Date.now());
 
   const toggleSound = () => {
     const next = !soundOn;
@@ -358,57 +366,54 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const invData = await safeParseJson<{ products: Product[] }>(resInv);
       if (invData && Array.isArray(invData.products)) {
         const incoming: Product[] = invData.products;
-        if (incoming.length === 0) {
-          setProducts([]);
-          if (typeof window !== 'undefined') {
-            try {
+        setProducts(prev => {
+          if (incoming.length === 0) {
+            if (typeof window !== 'undefined') {
               localStorage.removeItem('stz_saved_products');
-            } catch (e) {}
-          }
-        } else {
-          setProducts(prev => {
-            const changed =
-              prev.length !== incoming.length ||
-              prev.some((p) => {
-                const inc = incoming.find((item) => item.id === p.id);
-                if (!inc) return true;
-                if (inc.name !== p.name) return true;
-                if (inc.category !== p.category) return true;
-                if (inc.sku !== p.sku) return true;
-                if (inc.location !== p.location) return true;
-                if (inc.description !== p.description) return true;
-                if (inc.imageUrl !== p.imageUrl) return true;
-                if (inc.totalStock !== p.totalStock) return true;
-                if (inc.updatedAt !== p.updatedAt) return true;
-                if (inc.variants.length !== p.variants.length) return true;
-                return inc.variants.some((iv, idx) => {
-                  const pv = p.variants[idx];
-                  if (!pv) return true;
-                  return (
-                    iv.stock !== pv.stock ||
-                    iv.size !== pv.size ||
-                    iv.color !== pv.color ||
-                    iv.sku !== pv.sku ||
-                    iv.price !== pv.price ||
-                    iv.minStock !== pv.minStock
-                  );
-                });
-              });
-            if (changed || prev.length === 0) {
-              const mapped = incoming.map((p) => ({
-                ...p,
-                variants: p.variants.map((v) => ({ ...v })),
-              }));
-              if (typeof window !== 'undefined') {
-                try {
-                  localStorage.setItem('stz_saved_products', JSON.stringify(mapped));
-                } catch (e) {}
-              }
-              return mapped;
             }
-            return prev;
-          });
-        }
+            return [];
+          }
+          const changed =
+            prev.length !== incoming.length ||
+            prev.some((p) => {
+              const inc = incoming.find((item) => item.id === p.id);
+              if (!inc) return true;
+              if (inc.name !== p.name) return true;
+              if (inc.category !== p.category) return true;
+              if (inc.sku !== p.sku) return true;
+              if (inc.location !== p.location) return true;
+              if (inc.description !== p.description) return true;
+              if (inc.imageUrl !== p.imageUrl) return true;
+              if (inc.totalStock !== p.totalStock) return true;
+              if (inc.updatedAt !== p.updatedAt) return true;
+              if (inc.variants.length !== p.variants.length) return true;
+              return inc.variants.some((iv, idx) => {
+                const pv = p.variants[idx];
+                if (!pv) return true;
+                return (
+                  iv.stock !== pv.stock ||
+                  iv.size !== pv.size ||
+                  iv.color !== pv.color ||
+                  iv.sku !== pv.sku ||
+                  iv.price !== pv.price ||
+                  iv.minStock !== pv.minStock
+                );
+              });
+            });
+          if (changed || prev.length === 0) {
+            const mapped = incoming.map((p) => ({
+              ...p,
+              variants: p.variants.map((v) => ({ ...v })),
+            }));
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem('stz_saved_products', JSON.stringify(mapped));
+              } catch (e) {}
+            }
+            return mapped;
+          }
+          return prev;
+        });
       }
 
       const logsData = await safeParseJson<{ logs: StockLog[] }>(resLogs);
@@ -468,7 +473,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       socketRef.current = null;
     }
 
-    setConnectionStatus('connecting');
+    // Maintain connection status optimistically so standby doesn't flash disconnect/reconnect warnings
+    if (reconnectAttemptsRef.current > 3 && typeof navigator !== 'undefined' && !navigator.onLine) {
+      setConnectionStatus('disconnected');
+    }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
@@ -481,6 +489,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       ws.onopen = () => {
         setConnectionStatus('connected');
         reconnectAttemptsRef.current = 0;
+        lastActivityRef.current = Date.now();
 
         // Send identity and device specs to server
         const specs = parseDeviceUserAgent();
@@ -512,6 +521,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       };
 
       ws.onmessage = (event) => {
+        lastActivityRef.current = Date.now();
+        setConnectionStatus('connected');
         try {
           const msg: RealtimeMessage = JSON.parse(event.data);
           handleRealtimeMessage(msg);
@@ -521,26 +532,31 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       };
 
       ws.onclose = () => {
-        setConnectionStatus('disconnected');
+        if (reconnectAttemptsRef.current > 3 && typeof navigator !== 'undefined' && !navigator.onLine) {
+          setConnectionStatus('disconnected');
+        }
         if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
 
-        // Auto-reconnect with exponential backoff (capped at 5s)
-        const delay = Math.min(1000 * Math.pow(1.5, reconnectAttemptsRef.current), 5000);
+        // Auto-reconnect with fast gentle backoff (1s - 2.5s)
+        const delay = Math.min(1000 * Math.pow(1.2, reconnectAttemptsRef.current), 2500);
         reconnectAttemptsRef.current += 1;
+        if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = setTimeout(() => {
           connectWebSocket();
         }, delay);
       };
 
       ws.onerror = (err) => {
-        console.warn('WebSocket connection error:', err);
+        console.warn('WebSocket connection notice:', err);
         try {
           ws.close();
         } catch {}
       };
     } catch (err) {
       console.error('Failed to construct WebSocket:', err);
-      setConnectionStatus('disconnected');
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setConnectionStatus('disconnected');
+      }
     }
   }, []);
 
@@ -935,19 +951,28 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const gentleSanitySync = setInterval(() => {
       refreshData();
-    }, 8000);
+    }, 25000);
 
     // Auto-reconnect & resync immediately when user wakes up screen, unlocks phone, or refocuses tab
     const handleWakeOrFocus = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      if (typeof document !== 'undefined' && (document.visibilityState === 'visible' || document.visibilityState === undefined)) {
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
+        reconnectAttemptsRef.current = 0;
+        // Background silent refresh
         refreshData();
+
+        const now = Date.now();
+        // If socket is not OPEN or was sleeping for > 15s during standby, reconnect instantly
         if (
           !socketRef.current ||
-          socketRef.current.readyState === WebSocket.CLOSED ||
-          socketRef.current.readyState === WebSocket.CLOSING
+          socketRef.current.readyState !== WebSocket.OPEN ||
+          now - lastActivityRef.current > 15000
         ) {
           connectWebSocket();
-        } else if (socketRef.current.readyState === WebSocket.OPEN) {
+        } else {
           try {
             socketRef.current.send(JSON.stringify({ type: 'PING' }));
           } catch {
@@ -959,7 +984,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     document.addEventListener('visibilitychange', handleWakeOrFocus);
     window.addEventListener('focus', handleWakeOrFocus);
+    window.addEventListener('pageshow', handleWakeOrFocus);
     window.addEventListener('online', handleWakeOrFocus);
+    window.addEventListener('resume', handleWakeOrFocus);
+
+    // Initial clean-slate wipe of cloud Firestore if needed
+    if (typeof window !== 'undefined' && !localStorage.getItem('stz_v3_cloud_cleared')) {
+      ensureFirebaseAuth().then(() => {
+        clearAllProductsFromFirestore().catch(() => {});
+        clearAllLogsFromFirestore().catch(() => {});
+        localStorage.setItem('stz_v3_cloud_cleared', 'true');
+      });
+    }
 
     // Real-time Firestore Cloud Database Synchronization (100% Free Tier, Auto-Updating)
     let unsubProducts: (() => void) | null = null;
@@ -970,52 +1006,45 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       try {
         // 1. Real-time Firestore Products sync across all devices
         unsubProducts = onSnapshot(collection(db, PRODUCTS_COLLECTION), (snapshot) => {
-          if (!snapshot.empty) {
-            const list: Product[] = [];
-            snapshot.forEach((d) => {
-              const item = d.data() as Product;
-              if (item && item.id) list.push(item);
-            });
-            if (list.length > 0) {
-              setProducts(list);
-              if (typeof window !== 'undefined') {
-                try {
-                  localStorage.setItem('stz_saved_products', JSON.stringify(list));
-                } catch (e) {}
-              }
-            }
-          } else {
-            // Firestore has no products yet - ensure catalog is empty
-            setProducts([]);
-            if (typeof window !== 'undefined') {
-              try {
+          const list: Product[] = [];
+          snapshot.forEach((d) => {
+            const item = d.data() as Product;
+            if (item && item.id) list.push(item);
+          });
+          setProducts(list);
+          if (typeof window !== 'undefined') {
+            try {
+              if (list.length > 0) {
+                localStorage.setItem('stz_saved_products', JSON.stringify(list));
+              } else {
                 localStorage.removeItem('stz_saved_products');
-              } catch (e) {}
-            }
+              }
+            } catch (e) {}
           }
         }, (err) => {
-          console.warn('[Firestore] Products real-time listener notice:', err?.message || err);
+          console.warn('[Firestore] Products real-time listener notice:', err);
         });
 
         // 2. Real-time Firestore Logs sync
         const logsQ = query(collection(db, LOGS_COLLECTION), orderBy('timestamp', 'desc'), limit(50));
         unsubLogs = onSnapshot(logsQ, (snapshot) => {
-          if (!snapshot.empty) {
-            const logList: StockLog[] = [];
-            snapshot.forEach((d) => {
-              const item = d.data() as StockLog;
-              if (item && item.id) logList.push(item);
-            });
-            if (logList.length > 0) {
-              setStockLogs(logList);
-            }
+          const logList: StockLog[] = [];
+          snapshot.forEach((d) => {
+            const item = d.data() as StockLog;
+            if (item && item.id) logList.push(item);
+          });
+          setStockLogs(logList);
+          if (typeof window !== 'undefined') {
+            try {
+              if (logList.length > 0) {
+                localStorage.setItem('stz_saved_logs', JSON.stringify(logList));
+              } else {
+                localStorage.removeItem('stz_saved_logs');
+              }
+            } catch (e) {}
           }
         }, (err) => {
-          if (err?.code === 'permission-denied') {
-            handleFirestoreError(err, OperationType.GET, LOGS_COLLECTION);
-          } else {
-            console.warn('[Firestore] Logs real-time listener:', err);
-          }
+          console.warn('[Firestore] Logs real-time listener notice:', err);
         });
 
         // 3. Real-time Firestore Settings sync
@@ -1027,11 +1056,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             }
           }
         }, (err) => {
-          if (err?.code === 'permission-denied') {
-            handleFirestoreError(err, OperationType.GET, `${SETTINGS_COLLECTION}/${SETTINGS_DOC_ID}`);
-          } else {
-            console.warn('[Firestore] Settings real-time listener:', err);
-          }
+          console.warn('[Firestore] Settings real-time listener notice:', err);
         });
       } catch (err) {
         console.warn('[Firestore] Listener initialization error:', err);
@@ -1047,7 +1072,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       clearInterval(gentleSanitySync);
       document.removeEventListener('visibilitychange', handleWakeOrFocus);
       window.removeEventListener('focus', handleWakeOrFocus);
+      window.removeEventListener('pageshow', handleWakeOrFocus);
       window.removeEventListener('online', handleWakeOrFocus);
+      window.removeEventListener('resume', handleWakeOrFocus);
       if (socketRef.current) socketRef.current.close();
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
@@ -1262,209 +1289,66 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     reason: string = ''
   ): Promise<boolean> => {
     try {
-      const numDelta = typeof delta === 'number' ? delta : (Number(delta) || 0);
-      const defaultMin = settings.defaultMinStockAlert || 3;
-
-      let optimisticProduct: Product | null = null;
-      let targetVariant: ProductVariant | null = null;
-      let prevStock = 0;
-      let calculatedNewStock = 0;
-
-      // 1. Immediate optimistic UI update in React state & localStorage
-      setProducts(prev => {
-        const target = prev.find(p => p.id === productId || p.name.toLowerCase() === productId.toLowerCase());
-        if (!target) return prev;
-
-        const variant = target.variants.find(v => v.id === variantId) || target.variants[0];
-        if (!variant) return prev;
-
-        prevStock = Number(variant.stock) || 0;
-        calculatedNewStock = Math.max(0, prevStock + numDelta);
-        targetVariant = { ...variant, stock: calculatedNewStock };
-
-        const updatedVariants = target.variants.map(v => (v.id === variant.id ? targetVariant! : { ...v }));
-        const totalStock = updatedVariants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
-
-        optimisticProduct = {
-          ...target,
-          variants: updatedVariants,
-          totalStock,
-          updatedAt: new Date().toISOString(),
-          lastUpdatedBy: {
-            deviceId: currentDevice.deviceId,
-            deviceName: currentDevice.deviceName,
-            operatorName: currentDevice.operatorName,
-          },
-        };
-
-        const next = prev.map(p => (p.id === target.id ? optimisticProduct! : p));
-        if (typeof window !== 'undefined') {
-          try {
-            localStorage.setItem('stz_saved_products', JSON.stringify(next));
-          } catch (e) {}
-        }
-        return next;
-      });
-
-      // 2. Prepare Log & Broadcast
-      const variantDesc = targetVariant ? `${(targetVariant as ProductVariant).size} / ${(targetVariant as ProductVariant).color}` : 'Varian';
-      const prodName = optimisticProduct ? (optimisticProduct as Product).name : 'Barang';
-      const logId = `log-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-
-      const newLog: StockLog = {
-        id: logId,
-        timestamp: new Date().toISOString(),
-        productId,
-        productName: prodName,
-        variantId,
-        variantDescription: variantDesc,
-        changeType,
-        delta: numDelta,
-        previousStock: prevStock,
-        newStock: calculatedNewStock,
-        reason,
-        deviceId: currentDevice.deviceId,
-        deviceName: currentDevice.deviceName,
-        operatorName: currentDevice.operatorName,
-      };
-
-      setStockLogs(prev => [newLog, ...prev.filter(l => l.id !== logId).slice(0, 100)]);
-      saveLogToFirestore(newLog);
-
-      if (optimisticProduct) {
-        syncProductToFirestore(optimisticProduct);
-      }
-
-      // 3. Audio & Toast feedback based on stock status
-      const minStockVal = targetVariant && Number((targetVariant as ProductVariant).minStock) > 0 
-        ? Number((targetVariant as ProductVariant).minStock) 
-        : defaultMin;
-      const isOut = calculatedNewStock === 0 || (optimisticProduct && (optimisticProduct as Product).totalStock === 0);
-      const isLow = !isOut && calculatedNewStock <= minStockVal;
-
-      if (isOut) {
-        playChime('alert');
-        addNotificationToast({
-          title: '⛔ PERINGATAN: STOK HABIS (0 PCS)!',
-          message: `${prodName} (${variantDesc}) telah habis (0 pcs)!`,
-          type: 'danger',
-          deviceName: currentDevice.deviceName,
-          operatorName: currentDevice.operatorName,
-          isRemote: false,
-          productName: prodName,
-          delta: numDelta,
-          newStock: 0,
-        });
-      } else if (isLow) {
-        playChime('warning');
-        addNotificationToast({
-          title: '⚠️ PERINGATAN: STOK MENIPIS',
-          message: `${prodName} (${variantDesc}) tersisa ${calculatedNewStock} pcs (di bawah batas minimum ${minStockVal} pcs).`,
-          type: 'warning',
-          deviceName: currentDevice.deviceName,
-          operatorName: currentDevice.operatorName,
-          isRemote: false,
-          productName: prodName,
-          delta: numDelta,
-          newStock: calculatedNewStock,
-        });
-      } else if (changeType === 'sale') {
-        playChime('sale');
-        addNotificationToast({
-          title: '✓ Penjualan Kasir Dicatat',
-          message: `${prodName} (${variantDesc}) berkurang ${Math.abs(numDelta)} pcs. Sisa: ${calculatedNewStock} pcs.`,
-          type: 'sale',
-          deviceName: currentDevice.deviceName,
-          operatorName: currentDevice.operatorName,
-          isRemote: false,
-          productName: prodName,
-          delta: numDelta,
-          newStock: calculatedNewStock,
-        });
-      } else if (changeType === 'restock') {
-        playChime('restock');
-        addNotificationToast({
-          title: '✓ Restock Masuk Dicatat',
-          message: `${prodName} (${variantDesc}) bertambah +${numDelta} pcs. Total: ${calculatedNewStock} pcs.`,
-          type: 'restock',
-          deviceName: currentDevice.deviceName,
-          operatorName: currentDevice.operatorName,
-          isRemote: false,
-          productName: prodName,
-          delta: numDelta,
-          newStock: calculatedNewStock,
-        });
-      } else {
-        playChime('adjustment');
-        addNotificationToast({
-          title: '✓ Penyesuaian Opname Dicatat',
-          message: `${prodName} (${variantDesc}) diset menjadi ${calculatedNewStock} pcs.`,
-          type: 'info',
-          deviceName: currentDevice.deviceName,
-          operatorName: currentDevice.operatorName,
-          isRemote: false,
-          productName: prodName,
-          delta: numDelta,
-          newStock: calculatedNewStock,
-        });
-      }
-
-      // 4. Cross-tab real-time sync
-      if (typeof window !== 'undefined' && 'BroadcastChannel' in window && optimisticProduct) {
-        try {
-          const bc = new BroadcastChannel('stz_inventory_channel');
-          bc.postMessage({
-            type: 'STOCK_UPDATED',
-            payload: {
-              product: optimisticProduct,
-              log: newLog,
-              isLowStock: isLow,
-              isOutOfStock: isOut,
-            },
-            meta: {
-              deviceId: currentDevice.deviceId,
-              deviceName: currentDevice.deviceName,
-              operatorName: currentDevice.operatorName,
-              timestamp: new Date().toISOString(),
-            },
-          });
-          bc.close();
-        } catch (e) {}
-      }
-
-      // 5. Send mutation to server
-      fetch('/api/stock/adjust', {
+      const response = await fetch('/api/stock/adjust', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           productId,
           variantId,
-          delta: numDelta,
+          delta,
           changeType,
           reason,
-          product: optimisticProduct,
-          productName: prodName,
-          variantSize: targetVariant ? (targetVariant as ProductVariant).size : undefined,
-          variantColor: targetVariant ? (targetVariant as ProductVariant).color : undefined,
           deviceId: currentDevice.deviceId,
           deviceName: currentDevice.deviceName,
           operatorName: currentDevice.operatorName,
         }),
-      }).then(async (res) => {
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.product) {
-            setProducts(prev => prev.map(p => (p.id === data.product.id ? data.product : p)));
-          }
-        }
-      }).catch(err => {
-        console.warn('Background server sync warning:', err);
       });
 
+      if (!response.ok) {
+        throw new Error('Gagal memperbarui stok di server');
+      }
+
+      const data = await response.json();
+      if (data.product) {
+        const clonedProduct: Product = {
+          ...data.product,
+          variants: data.product.variants.map((v: any) => ({ ...v })),
+        };
+        setProducts(prev => prev.map(p => (p.id === clonedProduct.id ? clonedProduct : p)));
+
+        if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+          try {
+            const bc = new BroadcastChannel('stz_inventory_channel');
+            bc.postMessage({
+              type: 'STOCK_UPDATED',
+              payload: {
+                product: clonedProduct,
+                log: data.log,
+                isLowStock: clonedProduct.variants.some((v: any) => v.stock <= v.minStock && v.stock > 0),
+                isOutOfStock: clonedProduct.totalStock === 0,
+              },
+              meta: {
+                deviceId: currentDevice.deviceId,
+                deviceName: currentDevice.deviceName,
+                operatorName: currentDevice.operatorName,
+                timestamp: new Date().toISOString(),
+              },
+            });
+            bc.close();
+          } catch (e) {}
+        }
+      }
+      if (data.log) {
+        setStockLogs(prev => [data.log, ...prev.filter(l => l.id !== data.log.id)]);
+        saveLogToFirestore(data.log).catch((err) => console.warn('[Firestore] Log sync notice:', err));
+      }
+      if (data.product) {
+        syncProductToFirestore(data.product).catch((err) => console.warn('[Firestore] Product sync notice:', err));
+      }
       return true;
     } catch (err) {
       console.error('Error adjusting stock:', err);
-      return true;
+      return false;
     }
   };
 
@@ -1478,88 +1362,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }>
   ): Promise<boolean> => {
     try {
-      if (!Array.isArray(items) || items.length === 0) return true;
-
-      // 1. Optimistic updates across all modified products
-      const affectedMap = new Map<string, Product>();
-      const generatedLogs: StockLog[] = [];
-
-      setProducts(prev => {
-        const nextMap = new Map(prev.map(p => [p.id, { ...p, variants: p.variants.map(v => ({ ...v })) }]));
-
-        for (const item of items) {
-          const prod = nextMap.get(item.productId);
-          if (!prod) continue;
-
-          const variant = prod.variants.find(v => v.id === item.variantId);
-          if (!variant) continue;
-
-          const numDelta = typeof item.delta === 'number' ? item.delta : (Number(item.delta) || 0);
-          const previousStock = Number(variant.stock) || 0;
-          const newStock = Math.max(0, previousStock + numDelta);
-          variant.stock = newStock;
-          prod.totalStock = prod.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
-          prod.updatedAt = new Date().toISOString();
-          prod.lastUpdatedBy = {
-            deviceId: currentDevice.deviceId,
-            deviceName: currentDevice.deviceName,
-            operatorName: currentDevice.operatorName,
-          };
-
-          affectedMap.set(prod.id, prod);
-
-          const log: StockLog = {
-            id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-            timestamp: new Date().toISOString(),
-            productId: prod.id,
-            productName: prod.name,
-            variantId: variant.id,
-            variantDescription: `${variant.size} / ${variant.color}`,
-            changeType: item.changeType || 'adjustment',
-            delta: numDelta,
-            previousStock,
-            newStock,
-            reason: item.reason || 'Penyesuaian Opname Fisik',
-            deviceId: currentDevice.deviceId,
-            deviceName: currentDevice.deviceName,
-            operatorName: currentDevice.operatorName,
-          };
-          generatedLogs.unshift(log);
-        }
-
-        const next = Array.from(nextMap.values());
-        if (typeof window !== 'undefined') {
-          try {
-            localStorage.setItem('stz_saved_products', JSON.stringify(next));
-          } catch (e) {}
-        }
-        return next;
-      });
-
-      if (generatedLogs.length > 0) {
-        setStockLogs(prev => [...generatedLogs, ...prev].slice(0, 100));
-        for (const log of generatedLogs.slice(0, 10)) {
-          saveLogToFirestore(log);
-        }
-      }
-
-      const affectedList = Array.from(affectedMap.values());
-      if (affectedList.length > 0) {
-        batchSyncProductsToFirestore(affectedList, generatedLogs);
-        playChime('restock');
-        addNotificationToast({
-          title: '✓ Stock Opname Berhasil Disimpan',
-          message: `${items.length} varian fisik telah diperbarui dan disinkronkan real-time.`,
-          type: 'restock',
-          deviceName: currentDevice.deviceName,
-          operatorName: currentDevice.operatorName,
-          isRemote: false,
-          productName: 'Opname Stok',
-        });
-      }
-
-      // 2. Server sync
-      fetch('/api/stock/batch', {
+      const response = await fetch('/api/stock/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1568,14 +1371,28 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           deviceName: currentDevice.deviceName,
           operatorName: currentDevice.operatorName,
         }),
-      }).catch(err => {
-        console.warn('Background batch sync warning:', err);
       });
-
-      return true;
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data.affectedProducts)) {
+          setProducts(prev => {
+            const map = new Map(prev.map(p => [p.id, p]));
+            for (const p of data.affectedProducts) {
+              map.set(p.id, p);
+            }
+            return Array.from(map.values());
+          });
+          batchSyncProductsToFirestore(data.affectedProducts, data.logs).catch((err) => console.warn('[Firestore] Batch sync notice:', err));
+        }
+        if (Array.isArray(data.logs)) {
+          setStockLogs(prev => [...data.logs, ...prev].slice(0, 100));
+        }
+        return true;
+      }
+      return false;
     } catch (err) {
       console.error('Error batch adjusting stock:', err);
-      return true;
+      return false;
     }
   };
 
@@ -1750,6 +1567,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const resetDemoData = async () => {
     try {
       await fetch('/api/reset-demo', { method: 'POST' });
+      await clearAllProductsFromFirestore().catch(() => {});
+      await clearAllLogsFromFirestore().catch(() => {});
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('stz_saved_products');
+        localStorage.removeItem('stz_saved_logs');
+      }
+      setProducts([]);
+      setStockLogs([]);
       await refreshData();
     } catch (err) {
       console.error('Error resetting demo data:', err);

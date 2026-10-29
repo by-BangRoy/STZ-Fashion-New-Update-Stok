@@ -78,25 +78,25 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 onClick={onOpenDeviceManager}
                 className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs font-semibold border transition-all hover:scale-105 active:scale-95 ${
-                  connectionStatus === 'connected'
-                    ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/80 shadow-sm'
-                    : 'bg-amber-950/70 border-amber-500/50 text-amber-300 hover:bg-amber-900/80'
+                  connectionStatus === 'disconnected'
+                    ? 'bg-slate-800/80 border-slate-600/50 text-slate-300 hover:bg-slate-700/80'
+                    : 'bg-emerald-950/70 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/80 shadow-sm'
                 }`}
-                title="Klik untuk cek daftar siapa saja perangkat yang tersambung online & detail perangkat"
+                title="Sistem Siap & Real-time - Klik untuk cek detail multi-perangkat kasir"
               >
                 <span className="relative flex h-2 w-2 sm:h-2.5 sm:w-2.5">
                   <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                    connectionStatus === 'connected' ? 'bg-emerald-400' : 'bg-amber-400'
+                    connectionStatus === 'disconnected' ? 'bg-slate-400' : 'bg-emerald-400'
                   }`} />
                   <span className={`relative inline-flex rounded-full h-2 w-2 sm:h-2.5 sm:w-2.5 ${
-                    connectionStatus === 'connected' ? 'bg-emerald-500' : 'bg-amber-500'
+                    connectionStatus === 'disconnected' ? 'bg-slate-400' : 'bg-emerald-500'
                   }`} />
                 </span>
                 <span className="hidden md:inline">
-                  {connectionStatus === 'connected' ? 'Perangkat:' : 'Menghubungkan:'}
+                  {connectionStatus === 'disconnected' ? 'Lokal:' : 'Perangkat:'}
                 </span>
                 <span className="font-bold text-[11px] sm:text-xs">
-                  {connectedDevicesCount} <span className="hidden xs:inline">Online</span>
+                  {Math.max(1, connectedDevicesCount)} <span className="hidden xs:inline">{connectionStatus === 'disconnected' ? 'Aktif' : 'Online'}</span>
                 </span>
               </button>
 

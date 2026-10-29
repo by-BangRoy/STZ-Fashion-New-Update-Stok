@@ -5,7 +5,6 @@ import {
   doc, 
   setDoc, 
   getDoc, 
-  getDocFromServer,
   getDocs, 
   onSnapshot, 
   deleteDoc, 
@@ -17,7 +16,7 @@ import {
 } from 'firebase/firestore';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Product, StockLog, AppSettings } from '../types/inventory.ts';
+import type { Product, StockLog, AppSettings } from '../types/inventory.ts';
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
@@ -26,17 +25,6 @@ export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestore
   : getFirestore(app);
 
 export const auth = getAuth(app);
-
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
-    }
-  }
-}
-testConnection();
 
 export enum OperationType {
   CREATE = 'create',
@@ -221,4 +209,24 @@ export async function clearAllProductsFromFirestore(): Promise<void> {
     console.error('[Firebase] Failed to clear all products from Firestore:', err);
   }
 }
+
+/**
+ * Delete all logs from Firestore
+ */
+export async function clearAllLogsFromFirestore(): Promise<void> {
+  const path = LOGS_COLLECTION;
+  try {
+    await ensureFirebaseAuth();
+    const snap = await getDocs(collection(db, LOGS_COLLECTION));
+    if (snap.empty) return;
+    const batch = writeBatch(db);
+    snap.forEach((d) => {
+      batch.delete(doc(db, LOGS_COLLECTION, d.id));
+    });
+    await batch.commit();
+  } catch (err: any) {
+    console.error('[Firebase] Failed to clear all logs from Firestore:', err);
+  }
+}
+
 

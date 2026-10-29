@@ -115,13 +115,13 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
     }
   }, [activeProduct.id, activeProduct.name, activeProduct.category, activeProduct.sku, activeProduct.location]);
 
-  // Sync selected variant when opened with initialVariantId or when product changes
+  // Sync selected variant when opened with initialVariantId
   useEffect(() => {
     if (isOpen) {
       if (initialVariantId && activeProduct.variants.some((v) => v.id === initialVariantId)) {
         setSelectedVariantId(initialVariantId);
-      } else if (activeProduct.variants[0]) {
-        setSelectedVariantId(activeProduct.variants[0].id);
+      } else if (!activeProduct.variants.some((v) => v.id === selectedVariantId)) {
+        setSelectedVariantId(activeProduct.variants[0]?.id || '');
       }
     }
   }, [isOpen, initialVariantId, activeProduct.id]);
@@ -269,7 +269,13 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
                   <span className="bg-amber-400/20 px-1.5 py-0.5 rounded text-amber-300 border border-amber-400/30">
                     {activeProduct.category || 'Umum'}
                   </span>
-                  {activeProduct.location && activeProduct.location.trim() !== '' && (
+                  {activeProduct.sku && activeProduct.sku.trim() !== '' && (
+                    <>
+                      <span>•</span>
+                      <span className="font-mono text-slate-300">{activeProduct.sku}</span>
+                    </>
+                  )}
+                  {activeProduct.location && (
                     <>
                       <span>•</span>
                       <span className="text-slate-300 flex items-center gap-0.5">
@@ -600,6 +606,25 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
                         <Plus className="w-4 h-4 stroke-[3]" />
                       </button>
                     </div>
+
+                    {/* Quick Preset Buttons */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">Pilih Cepat:</span>
+                      {[1, 2, 3, 5, 10, 12, 24].map((qtyVal) => (
+                        <button
+                          key={qtyVal}
+                          type="button"
+                          onClick={() => setQuantity(qtyVal)}
+                          className={`text-[11px] px-2 py-0.5 rounded-lg font-bold border transition-all ${
+                            quantity === qtyVal
+                              ? 'bg-amber-500 text-slate-950 border-amber-600 font-black shadow-xs'
+                              : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          {qtyVal === 12 ? '12 (1 Lsn)' : qtyVal === 24 ? '24 (2 Lsn)' : `${qtyVal} pcs`}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -628,6 +653,36 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
                       >
                         <Plus className="w-4 h-4 stroke-[3]" />
                       </button>
+                    </div>
+
+                    {/* Quick Exact Preset Buttons */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">Set Fisik:</span>
+                      <button
+                        type="button"
+                        onClick={() => setExactStock(0)}
+                        className={`text-[11px] px-2.5 py-0.5 rounded-lg font-bold border transition-all ${
+                          exactStock === 0
+                            ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
+                            : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                        }`}
+                      >
+                        0 (HABIS)
+                      </button>
+                      {[1, 2, 5, 10, 12, 20, 50, 100].map((numVal) => (
+                        <button
+                          key={numVal}
+                          type="button"
+                          onClick={() => setExactStock(numVal)}
+                          className={`text-[11px] px-2 py-0.5 rounded-lg font-bold border transition-all ${
+                            exactStock === numVal
+                              ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                              : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          {numVal} pcs
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}
