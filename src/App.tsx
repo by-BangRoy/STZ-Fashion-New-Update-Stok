@@ -47,7 +47,8 @@ function DashboardView() {
     batchImportProducts,
     refreshData,
     isRefreshing,
-    addNotificationToast
+    addNotificationToast,
+    currentDevice
   } = useInventory();
 
   // Real-time stock warnings calculation
@@ -175,7 +176,30 @@ function DashboardView() {
   };
 
   const handleExportCSV = () => {
-    exportInventoryToCSV(products, settings.profile.storeName || 'STZstok');
+    if (products.length === 0) {
+      addNotificationToast({
+        title: 'Katalog Masih Kosong',
+        message: 'Belum ada data barang untuk diekspor.',
+        type: 'warning',
+        deviceName: currentDevice.deviceName,
+        operatorName: currentDevice.operatorName,
+        isRemote: false,
+        productName: 'Ekspor',
+      });
+      return;
+    }
+    const success = exportInventoryToCSV(products, settings.profile.storeName || 'STZstok');
+    if (success) {
+      addNotificationToast({
+        title: '✓ Ekspor Berhasil',
+        message: `File rekap stok CSV berhasil diunduh (${products.length} model barang).`,
+        type: 'restock',
+        deviceName: currentDevice.deviceName,
+        operatorName: currentDevice.operatorName,
+        isRemote: false,
+        productName: 'Ekspor',
+      });
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -421,26 +445,26 @@ function DashboardView() {
                 <span>{isRefreshing ? 'Memuat...' : 'Refresh'}</span>
               </button>
 
-              {/* Ekspor CSV Button */}
+              {/* Ekspor Button */}
               <button
                 onClick={handleExportCSV}
                 disabled={products.length === 0}
-                title="Unduh File CSV (Kompatibel Excel, Google Sheets, WPS)"
+                title="Unduh File Rekap Stok (Kompatibel Excel, Google Sheets, WPS)"
                 className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 active:from-amber-600 active:to-amber-700 disabled:opacity-40 disabled:pointer-events-none text-slate-950 rounded-xl text-xs font-extrabold transition-all shadow-sm active:scale-95 shrink-0"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>Ekspor CSV</span>
+                <span>Ekspor</span>
               </button>
 
-              {/* Impor Semua File Button */}
+              {/* Import Button */}
               <button
+                type="button"
                 onClick={() => setIsUniversalImportOpen(true)}
-                disabled={isImporting}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 sm:py-2 bg-yellow-100/90 hover:bg-yellow-200 active:bg-yellow-300 border border-yellow-300 text-amber-950 rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95 shrink-0"
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-yellow-100/90 hover:bg-yellow-200 active:bg-yellow-300 border border-yellow-300 text-amber-950 rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95 shrink-0 cursor-pointer"
                 title="Impor Data dari Semua File (Excel .xlsx, .xls, CSV, TSV, TXT, JSON)"
               >
                 <Upload className="w-3.5 h-3.5 text-amber-800" />
-                <span>{isImporting ? 'Mengimpor...' : 'Impor File Stok'}</span>
+                <span>Import</span>
               </button>
 
               <input
@@ -612,7 +636,7 @@ function DashboardView() {
                 className="px-5 py-3 bg-yellow-100 hover:bg-yellow-200 border border-yellow-300 text-amber-950 text-xs sm:text-sm font-extrabold rounded-xl transition-all shadow-xs flex items-center gap-2 active:scale-95"
               >
                 <Upload className="w-4 h-4 text-amber-800" />
-                <span>📥 Impor Semua File (Excel / CSV / TXT)</span>
+                <span>📥 Import File (Excel / CSV / TXT)</span>
               </button>
             </div>
           </div>
@@ -665,28 +689,30 @@ function DashboardView() {
       </main>
 
       {/* Footer */}
-      <footer className="mt-auto bg-white/90 border-t border-yellow-200 py-5 text-xs text-slate-500 hidden sm:block">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <footer className="mt-auto bg-white/95 border-t border-yellow-200 py-4 sm:py-5 text-xs text-slate-500 block">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-800">{settings.profile.storeName || 'STZ Stok'}</span>
             <span>•</span>
             <span className="text-amber-800/80">Rekap Barang Keluar / Masuk</span>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <button
+              type="button"
               onClick={() => setIsSettingsModalOpen(true)}
-              className="text-slate-600 hover:text-amber-700 font-semibold flex items-center gap-1 transition-colors"
+              className="text-slate-600 hover:text-amber-800 font-bold px-3 py-1.5 rounded-xl hover:bg-yellow-100 flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <Sliders className="w-3.5 h-3.5" />
+              <Sliders className="w-3.5 h-3.5 text-amber-700" />
               <span>Pengaturan & Profil</span>
             </button>
             <button
+              type="button"
               onClick={lockApp}
-              className="text-slate-500 hover:text-slate-800 flex items-center gap-1 transition-colors"
-              title="Kunci layar"
+              className="text-rose-900 bg-rose-100/90 hover:bg-rose-200 border border-rose-300 px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-bold transition-all cursor-pointer active:scale-95 shadow-xs"
+              title="Kunci Layar Aplikasi Sekarang (PIN Masuk)"
             >
-              <Lock className="w-3 h-3" />
+              <Lock className="w-3.5 h-3.5 text-rose-700" />
               <span>Kunci Aplikasi</span>
             </button>
           </div>
@@ -746,14 +772,19 @@ function DashboardView() {
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
       />
+
+      <UniversalImportModal
+        isOpen={isUniversalImportOpen}
+        onClose={() => setIsUniversalImportOpen(false)}
+      />
     </div>
   );
 }
 
 function MainDashboard() {
-  const { settings, isAuthenticated } = useInventory();
+  const { settings, isAuthenticated, isLocked } = useInventory();
 
-  if (settings.pinRequired && !isAuthenticated) {
+  if (isLocked || (settings.pinRequired && !isAuthenticated)) {
     return <PinLockScreen />;
   }
 

@@ -48,7 +48,7 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({ isOpen, onCl
             productId: p.id,
             productName: p.name,
             variantId: v.id,
-            variantDesc: `${v.size} • ${v.color}`,
+            variantDesc: `${v.size} • Warna: ${v.color}`,
             systemStock: v.stock,
             actualStock: v.stock,
           });

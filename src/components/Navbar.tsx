@@ -174,11 +174,13 @@ export const Navbar: React.FC<NavbarProps> = ({
 
               {/* Lock Button (Both Desktop & Mobile) */}
               <button
+                type="button"
                 onClick={lockApp}
-                className="p-1.5 sm:p-2 rounded-xl bg-slate-800 hover:bg-amber-950/70 border border-slate-700 text-slate-300 hover:text-amber-300 transition-colors"
+                className="flex items-center gap-1.5 p-1.5 sm:px-3 sm:py-2 rounded-xl bg-slate-800 hover:bg-rose-950/70 border border-slate-700 hover:border-rose-600/50 text-slate-300 hover:text-rose-300 transition-all active:scale-95 cursor-pointer shadow-xs"
                 title="Kunci Layar Aplikasi (PIN Lock)"
               >
                 <Lock className="w-4 h-4 text-amber-400" />
+                <span className="hidden lg:inline text-xs font-bold">Kunci</span>
               </button>
 
               {/* Add Product Button (Desktop) */}

@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "STZStok - Rekap Barang Keluar / Masuk",
+  "short_name": "STZStok",
+  "description": "Aplikasi Rekap Stok Barang Keluar dan Masuk Real-Time Multi-Perangkat",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#FEFCE8",
+  "theme_color": "#FEFCE8",
+  "icons": [
+    {
+      "src": "/assets/aistudio/WhatsApp_Image_2026-10-20_at_14.00.08_44e1b065.jpeg",
+      "sizes": "192x192",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/aistudio/WhatsApp_Image_2026-10-20_at_14.00.08_44e1b065.jpeg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ]
+}

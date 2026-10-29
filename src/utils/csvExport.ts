@@ -17,10 +17,10 @@ function escapeCsvCell(value: any): string {
  * Includes UTF-8 BOM (\uFEFF) and Windows CRLF so Microsoft Excel, Google Sheets,
  * and WPS Office open it directly with clean separated columns.
  */
-export function exportInventoryToCSV(products: Product[], storeName: string = 'STZstok') {
+export function exportInventoryToCSV(products: Product[], storeName: string = 'STZstok'): boolean {
   if (!products || products.length === 0) {
-    alert('Katalog masih kosong, tidak ada data barang untuk diekspor.');
-    return;
+    console.warn('Katalog masih kosong, tidak ada data barang untuk diekspor.');
+    return false;
   }
 
   // Exact download timestamp in local WIB format
@@ -128,6 +128,7 @@ export function exportInventoryToCSV(products: Product[], storeName: string = 'S
       }),
     }).catch(() => {});
   } catch (e) {}
+  return true;
 }
 
 /**

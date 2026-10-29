@@ -392,7 +392,7 @@ app.post('/api/stock/adjust', (req, res) => {
     productId: product.id,
     productName: product.name,
     variantId: variant.id,
-    variantDescription: `${variant.size} / ${variant.color}`,
+    variantDescription: `${variant.size} • Warna: ${variant.color}`,
     changeType,
     delta: numDelta,
     previousStock,
@@ -467,7 +467,7 @@ app.post('/api/stock/batch', (req, res) => {
       productId: product.id,
       productName: product.name,
       variantId: variant.id,
-      variantDescription: `${variant.size} / ${variant.color}`,
+      variantDescription: `${variant.size} • Warna: ${variant.color}`,
       changeType,
       delta,
       previousStock,
@@ -584,6 +584,7 @@ app.post('/api/products/batch-import', (req, res) => {
   const { 
     items, 
     replaceAll = false, 
+    importMode = 'update', // 'update' | 'add' | 'replace'
     sourceFileName = 'Berkas Impor',
     deviceId = 'web', 
     deviceName = 'Web App', 
@@ -641,20 +642,67 @@ app.post('/api/products/batch-import', (req, res) => {
     return res.status(400).json({ error: 'Tidak ada data produk valid yang berhasil diproses' });
   }
 
-  if (replaceAll) {
+  let updatedCount = 0;
+  let addedCount = 0;
+
+  if (replaceAll || importMode === 'replace') {
     products = createdProducts;
+    addedCount = createdProducts.length;
   } else {
-    // Append or merge matching by name
-    const existingMap = new Map(products.map(p => [p.name.toLowerCase().trim(), p]));
+    // Mode 'update' (set physical stock) or 'add' (increase stock by +qty)
     for (const cp of createdProducts) {
-      const key = cp.name.toLowerCase().trim();
-      if (existingMap.has(key)) {
-        const old = existingMap.get(key)!;
-        cp.id = old.id;
-        const idx = products.findIndex(p => p.id === old.id);
-        if (idx !== -1) products[idx] = cp;
+      const matchIdx = products.findIndex((p) => {
+        if (cp.sku && p.sku && cp.sku.toLowerCase() === p.sku.toLowerCase()) return true;
+        return cp.name.toLowerCase().trim() === p.name.toLowerCase().trim();
+      });
+
+      if (matchIdx !== -1) {
+        // Product exists -> update its variants
+        const existing = products[matchIdx];
+        const existingVars = existing.variants || [];
+
+        for (const cv of cp.variants) {
+          const vIdx = existingVars.findIndex(
+            (ev) =>
+              ev.size.toLowerCase().trim() === cv.size.toLowerCase().trim() &&
+              ev.color.toLowerCase().trim() === cv.color.toLowerCase().trim()
+          );
+
+          if (vIdx !== -1) {
+            if (importMode === 'add') {
+              existingVars[vIdx].stock = Math.max(0, (Number(existingVars[vIdx].stock) || 0) + cv.stock);
+            } else {
+              // 'update' mode: set exact physical stock from file
+              existingVars[vIdx].stock = cv.stock;
+            }
+            if (cv.price > 0 && (!existingVars[vIdx].price || existingVars[vIdx].price === 0)) {
+              existingVars[vIdx].price = cv.price;
+            }
+            if (cv.costPrice !== undefined && cv.costPrice > 0 && (!existingVars[vIdx].costPrice || existingVars[vIdx].costPrice === 0)) {
+              existingVars[vIdx].costPrice = cv.costPrice;
+            }
+            if (cv.barcode && !existingVars[vIdx].barcode) {
+              existingVars[vIdx].barcode = cv.barcode;
+            }
+          } else {
+            // New variant for existing product
+            existingVars.push(cv);
+          }
+        }
+
+        existing.variants = existingVars;
+        existing.totalStock = existingVars.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+        existing.updatedAt = timestamp;
+        existing.lastUpdatedBy = { deviceId, deviceName, operatorName };
+        if (cp.category && (!existing.category || existing.category === 'Pakaian Busana')) {
+          existing.category = cp.category;
+        }
+        products[matchIdx] = existing;
+        updatedCount++;
       } else {
+        // Brand new product -> add to list
         products.unshift(cp);
+        addedCount++;
       }
     }
   }
@@ -662,18 +710,25 @@ app.post('/api/products/batch-import', (req, res) => {
   saveInventory();
 
   // Create audit log for batch import
+  const logReason =
+    importMode === 'replace' || replaceAll
+      ? `Ganti Total Katalog dari "${sourceFileName}" (${createdProducts.length} model barang)`
+      : importMode === 'add'
+      ? `Tambah Stok Masuk (+Qty) dari "${sourceFileName}": ${updatedCount} model diperbarui, ${addedCount} produk baru`
+      : `Update Stok Fisik dari "${sourceFileName}": ${updatedCount} model diperbarui, ${addedCount} produk baru`;
+
   const batchLog: StockLog = {
     id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     timestamp,
     productId: 'all',
     productName: `${createdProducts.length} Model Barang`,
     variantId: 'all',
-    variantDescription: `${totalImportedUnits} pcs total stok fisik`,
+    variantDescription: `${totalImportedUnits} pcs total unit terproses`,
     changeType: 'restock',
     delta: totalImportedUnits,
     previousStock: 0,
     newStock: totalImportedUnits,
-    reason: `Impor Stok Massal dari "${sourceFileName}" (${createdProducts.length} model barang)`,
+    reason: logReason,
     deviceId,
     deviceName,
     operatorName,
@@ -696,6 +751,8 @@ app.post('/api/products/batch-import', (req, res) => {
   return res.status(200).json({
     success: true,
     count: createdProducts.length,
+    updatedCount,
+    addedCount,
     totalUnits: totalImportedUnits,
     products,
     log: batchLog,
@@ -1019,7 +1076,9 @@ app.post('/api/auth/verify-pin', (req, res) => {
   if (!appSettings.pinRequired) {
     return res.json({ success: true, message: 'PIN tidak diwajibkan' });
   }
-  const isValid = pin === appSettings.securityPin;
+  const cleanInput = String(pin ?? '').trim();
+  const cleanSaved = String(appSettings.securityPin ?? '000000').trim();
+  const isValid = cleanInput.length > 0 && cleanInput === cleanSaved;
   return res.json({ success: isValid });
 });
 
@@ -1187,10 +1246,19 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(__dirname, 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    if (!fs.existsSync(distPath) || !fs.existsSync(path.join(distPath, 'index.html'))) {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } else {
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
   }
 
   server.listen(PORT, '0.0.0.0', () => {

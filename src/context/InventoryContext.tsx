@@ -20,7 +20,7 @@ import {
   handleFirestoreError,
   OperationType
 } from '../services/firebase.ts';
-import { collection, doc, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
 
 export interface RealtimeToast {
   id: string;
@@ -54,6 +54,7 @@ interface InventoryContextType {
   updateDeviceProfile: (deviceName: string, operatorName: string) => void;
   // Auth & PIN
   isAuthenticated: boolean;
+  isLocked: boolean;
   unlockWithPin: (pin: string) => Promise<{ success: boolean; error?: string }>;
   lockApp: () => void;
   // Settings & Store Profile
@@ -84,8 +85,9 @@ interface InventoryContextType {
   batchImportProducts: (
     items: Partial<Product>[],
     replaceAll?: boolean,
-    sourceFileName?: string
-  ) => Promise<{ success: boolean; count: number; totalUnits: number; error?: string }>;
+    sourceFileName?: string,
+    importMode?: 'update' | 'add' | 'replace'
+  ) => Promise<{ success: boolean; count: number; totalUnits: number; updatedCount?: number; addedCount?: number; error?: string }>;
   updateProduct: (id: string, productData: Partial<Product>) => Promise<boolean>;
   deleteProduct: (id: string) => Promise<boolean>;
   dismissToast: (id: string) => void;
@@ -152,12 +154,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Initialize with local cache or empty catalog
   const [products, setProducts] = useState<Product[]>(() => {
     if (typeof window !== 'undefined') {
-      if (!localStorage.getItem('stz_v3_clean_slate')) {
-        localStorage.removeItem('stz_saved_products');
-        localStorage.removeItem('stz_saved_logs');
-        localStorage.setItem('stz_v3_clean_slate', 'true');
-        return [];
-      }
       const saved = localStorage.getItem('stz_saved_products');
       if (saved) {
         try {
@@ -199,9 +195,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return DEFAULT_SETTINGS;
   });
 
+  // Explicit Lock Screen State: triggers instantly when "Kunci Aplikasi" is clicked
+  const [isLocked, setIsLocked] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('stz_locked') === 'true';
+  });
+
   // Authentication State: remember authentication on device unless explicitly locked
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
+    if (localStorage.getItem('stz_locked') === 'true') return false;
     return sessionStorage.getItem('stz_unlocked') === 'true' || localStorage.getItem('stz_unlocked') === 'true';
   });
 
@@ -287,46 +290,69 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Auth & PIN functions
+  // Auth & PIN functions: accessible by any device that enters the correct PIN
   const unlockWithPin = async (inputPin: string): Promise<{ success: boolean; error?: string }> => {
+    const cleanInput = String(inputPin || '').trim();
+    if (!cleanInput) {
+      return { success: false, error: 'Masukkan PIN keamanan Anda' };
+    }
+
+    const markSuccess = (resolvedSettings?: AppSettings) => {
+      setIsAuthenticated(true);
+      setIsLocked(false);
+      if (resolvedSettings) {
+        setSettings(prev => ({ ...prev, ...resolvedSettings }));
+      }
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('stz_locked');
+        sessionStorage.setItem('stz_unlocked', 'true');
+        localStorage.setItem('stz_unlocked', 'true');
+        localStorage.setItem('stz_authenticated_pin', cleanInput);
+      }
+      playChime('sale');
+      return { success: true };
+    };
+
+    // 1. Instant local verification (Zero latency, works offline / standby immediately)
+    const localPin = String(settings.securityPin || '000000').trim();
+    if (cleanInput === localPin) {
+      return markSuccess();
+    }
+
+    // 2. Server verification
     try {
       const res = await fetch('/api/auth/verify-pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: inputPin }),
+        body: JSON.stringify({ pin: cleanInput }),
       }).catch(() => null);
+
       const data = await safeParseJson<{ success: boolean; message?: string }>(res);
       if (data && data.success) {
-        setIsAuthenticated(true);
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem('stz_unlocked', 'true');
-          localStorage.setItem('stz_unlocked', 'true');
-        }
-        playChime('sale');
-        return { success: true };
-      } else if (data && !data.success) {
-        playChime('alert');
-        return { success: false, error: 'PIN yang Anda masukkan salah' };
+        return markSuccess();
       }
-    } catch {
-      // Local fallback
-    }
+    } catch {}
 
-    // Local fallback
-    if (inputPin === settings.securityPin) {
-      setIsAuthenticated(true);
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem('stz_unlocked', 'true');
-        localStorage.setItem('stz_unlocked', 'true');
+    // 3. Direct Cloud Firestore Settings Document check (if PIN was changed from another device while server was idle)
+    try {
+      const snap = await getDoc(doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID));
+      if (snap.exists()) {
+        const cloudSettings = snap.data() as AppSettings;
+        if (cloudSettings && String(cloudSettings.securityPin || '').trim() === cleanInput) {
+          return markSuccess(cloudSettings);
+        }
       }
-      playChime('sale');
-      return { success: true };
-    }
-    return { success: false, error: 'PIN tidak sesuai' };
+    } catch {}
+
+    playChime('alert');
+    return { success: false, error: 'PIN yang Anda masukkan salah' };
   };
 
   const lockApp = () => {
+    setIsLocked(true);
     setIsAuthenticated(false);
     if (typeof window !== 'undefined') {
+      localStorage.setItem('stz_locked', 'true');
       sessionStorage.removeItem('stz_unlocked');
       localStorage.removeItem('stz_unlocked');
     }
@@ -373,8 +399,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const incoming: Product[] = invData.products;
         setProducts(prev => {
           if (incoming.length === 0) {
-            if (typeof window !== 'undefined') {
-              localStorage.removeItem('stz_saved_products');
+            if (prev.length > 0) {
+              // Server woke up empty from standby: restore server storage from client cache
+              fetch('/api/inventory/sync-backup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clientProducts: prev, force: true }),
+              }).catch(() => {});
+              return prev;
             }
             return [];
           }
@@ -966,15 +998,28 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           reconnectTimeoutRef.current = null;
         }
         reconnectAttemptsRef.current = 0;
-        // Background silent refresh
+        // If waking up from background or long standby, immediately check localStorage
+        if (typeof window !== 'undefined') {
+          try {
+            const cachedProd = localStorage.getItem('stz_saved_products');
+            if (cachedProd) {
+              const parsed = JSON.parse(cachedProd);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                setProducts(prev => (prev.length === 0 ? parsed : prev));
+              }
+            }
+          } catch {}
+        }
+
+        // Silent background refresh
         refreshData();
 
         const now = Date.now();
-        // If socket is not OPEN or was sleeping for > 15s during standby, reconnect instantly
+        // If socket is not OPEN or was sleeping for > 10s during standby, reconnect silently
         if (
           !socketRef.current ||
           socketRef.current.readyState !== WebSocket.OPEN ||
-          now - lastActivityRef.current > 15000
+          now - lastActivityRef.current > 10000
         ) {
           connectWebSocket();
         } else {
@@ -993,16 +1038,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     window.addEventListener('online', handleWakeOrFocus);
     window.addEventListener('resume', handleWakeOrFocus);
 
-    // Initial clean-slate wipe of cloud Firestore if needed
-    if (typeof window !== 'undefined' && !localStorage.getItem('stz_v3_cloud_cleared')) {
-      ensureFirebaseAuth().then(() => {
-        clearAllProductsFromFirestore().catch(() => {});
-        clearAllLogsFromFirestore().catch(() => {});
-        localStorage.setItem('stz_v3_cloud_cleared', 'true');
-      });
-    }
-
-    // Real-time Firestore Cloud Database Synchronization (100% Free Tier, Auto-Updating)
+    // Real-time Firestore Cloud Database Synchronization (Free Tier, 24/7 Multi-Device Sync)
     let unsubProducts: (() => void) | null = null;
     let unsubLogs: (() => void) | null = null;
     let unsubSettings: (() => void) | null = null;
@@ -1016,15 +1052,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             const item = d.data() as Product;
             if (item && item.id) list.push(item);
           });
-          setProducts(list);
-          if (typeof window !== 'undefined') {
-            try {
-              if (list.length > 0) {
+          if (list.length > 0) {
+            setProducts(list);
+            if (typeof window !== 'undefined') {
+              try {
                 localStorage.setItem('stz_saved_products', JSON.stringify(list));
-              } else {
-                localStorage.removeItem('stz_saved_products');
-              }
-            } catch (e) {}
+              } catch (e) {}
+            }
           }
         }, (err) => {
           console.warn('[Firestore] Products real-time listener notice:', err);
@@ -1464,15 +1498,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const batchImportProducts = async (
     items: Partial<Product>[],
     replaceAll = false,
-    sourceFileName = 'Berkas Impor'
-  ): Promise<{ success: boolean; count: number; totalUnits: number; error?: string }> => {
+    sourceFileName = 'Berkas Impor',
+    importMode: 'update' | 'add' | 'replace' = 'update'
+  ): Promise<{ success: boolean; count: number; totalUnits: number; updatedCount?: number; addedCount?: number; error?: string }> => {
     try {
       const response = await fetch('/api/products/batch-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           items,
-          replaceAll,
+          replaceAll: replaceAll || importMode === 'replace',
+          importMode,
           sourceFileName,
           deviceId: currentDevice.deviceId,
           deviceName: currentDevice.deviceName,
@@ -1503,9 +1539,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       playChime('restock');
+      const actionTitle =
+        importMode === 'replace'
+          ? `✓ Katalog Diganti (${data.count} Model Barang)`
+          : importMode === 'add'
+          ? `📥 Tambah Stok Masuk (${data.count} Model Barang)`
+          : `🔄 Stok Berhasil Diupdate (${data.count} Model Barang)`;
+
       addNotificationToast({
-        title: `📥 Berhasil Mengimpor ${data.count} Model Barang`,
-        message: `Total ${Number(data.totalUnits || 0).toLocaleString('id-ID')} unit stok fisik dari "${sourceFileName}" berhasil masuk katalog!`,
+        title: actionTitle,
+        message: `Total ${Number(data.totalUnits || 0).toLocaleString('id-ID')} unit stok fisik dari "${sourceFileName}" berhasil diproses!`,
         type: 'restock',
         deviceName: currentDevice.deviceName,
         operatorName: currentDevice.operatorName,
@@ -1516,6 +1559,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return {
         success: true,
         count: data.count || items.length,
+        updatedCount: data.updatedCount,
+        addedCount: data.addedCount,
         totalUnits: data.totalUnits || 0,
       };
     } catch (err: any) {
@@ -1738,6 +1783,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         toggleSound,
         updateDeviceProfile,
         isAuthenticated,
+        isLocked,
         unlockWithPin,
         lockApp,
         settings,

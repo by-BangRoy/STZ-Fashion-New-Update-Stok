@@ -376,22 +376,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                       <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
                         Warna
                       </label>
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="color"
-                          value={v.colorHex || '#CBD5E1'}
-                          onChange={(e) => handleVariantChange(idx, 'colorHex', e.target.value)}
-                          className="w-8 h-9 p-0.5 rounded-lg border border-slate-300 cursor-pointer shrink-0"
-                          title="Pilih warna"
-                        />
-                        <input
-                          type="text"
-                          value={v.color}
-                          onChange={(e) => handleVariantChange(idx, 'color', e.target.value)}
-                          placeholder="Misal: Hitam, Navy"
-                          className="w-full px-2.5 py-2 text-sm sm:text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
-                        />
-                      </div>
+                      <input
+                        type="text"
+                        value={v.color}
+                        onChange={(e) => handleVariantChange(idx, 'color', e.target.value)}
+                        placeholder="Misal: Hitam, Navy, Putih"
+                        className="w-full px-2.5 py-2 text-sm sm:text-xs bg-white border border-slate-300 rounded-xl font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
                     </div>
                   </div>
 

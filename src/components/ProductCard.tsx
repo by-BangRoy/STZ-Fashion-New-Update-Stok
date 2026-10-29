@@ -216,15 +216,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                         : 'border-yellow-100 hover:border-yellow-300 bg-yellow-50/30'
                     }`}
                   >
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      {variant.colorHex && (
-                        <span
-                          className="w-2.5 h-2.5 rounded-full border border-slate-300 shrink-0"
-                          style={{ backgroundColor: variant.colorHex }}
-                        />
-                      )}
-                      <span className="font-bold text-slate-800">{variant.size}</span>
-                      <span className="text-slate-400 text-[11px] truncate">({variant.color})</span>
+                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                      <span className="font-black text-slate-900 bg-white/90 px-1.5 py-0.5 rounded border border-slate-300 text-xs shadow-2xs">
+                        {variant.size}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-700">
+                        Warna: <span className="font-black text-slate-950">{variant.color}</span>
+                      </span>
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">

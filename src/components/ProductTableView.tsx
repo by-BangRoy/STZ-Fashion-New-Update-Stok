@@ -139,15 +139,12 @@ export const ProductTableView: React.FC<ProductTableViewProps> = ({
                                 : 'bg-emerald-50/60 border-emerald-200/90 text-emerald-950 hover:bg-emerald-100'
                             }`}
                           >
-                            {/* Color chip */}
-                            {variant.colorHex && (
-                              <span
-                                className="w-2.5 h-2.5 rounded-full border border-slate-300 shrink-0 shadow-xs"
-                                style={{ backgroundColor: variant.colorHex }}
-                              />
-                            )}
-                            <span className="font-extrabold">{variant.size}</span>
-                            <span className="text-slate-500 text-[11px]">({variant.color})</span>
+                            <span className="font-black bg-white/90 px-1.5 py-0.5 rounded border border-slate-300 text-slate-900 shadow-2xs">
+                              {variant.size}
+                            </span>
+                            <span className="text-xs font-semibold text-slate-800">
+                              Warna: <span className="font-black text-slate-950">{variant.color}</span>
+                            </span>
 
                             {/* Stock Display Badge */}
                             <span className={`font-black text-xs px-2 py-0.5 rounded-md ${

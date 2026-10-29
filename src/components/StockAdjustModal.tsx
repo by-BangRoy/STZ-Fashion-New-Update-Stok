@@ -379,15 +379,13 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
                           }`}>
                             {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
                           </div>
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            {v.colorHex && (
-                              <span 
-                                className="w-2.5 h-2.5 rounded-full border border-slate-300 shrink-0" 
-                                style={{ backgroundColor: v.colorHex }}
-                              />
-                            )}
-                            <span className="text-xs font-black text-slate-900">{v.size}</span>
-                            <span className="text-[11px] text-slate-500 truncate">({v.color})</span>
+                          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                            <span className="text-xs font-black text-slate-900 bg-white px-1.5 py-0.5 rounded border border-slate-300 shadow-2xs">
+                              {v.size}
+                            </span>
+                            <span className="text-xs font-semibold text-slate-800">
+                              Warna: <span className="font-black text-slate-950">{v.color}</span>
+                            </span>
                           </div>
                         </div>
 
@@ -412,9 +410,9 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
               <div className="px-3 py-2 bg-yellow-50/80 rounded-xl border border-yellow-200 flex flex-col gap-1.5 text-xs">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-slate-500">Varian aktif:</span>
-                    <span className="font-extrabold text-slate-900 bg-white px-2 py-0.5 rounded border border-yellow-300">
-                      {currentVariant.size} • {currentVariant.color}
+                    <span className="text-slate-600 font-semibold">Varian aktif:</span>
+                    <span className="font-black text-slate-900 bg-white px-2 py-0.5 rounded-lg border border-yellow-300 shadow-2xs">
+                      {currentVariant.size} • Warna: <span className="text-slate-950 font-black">{currentVariant.color}</span>
                     </span>
                   </div>
                   <div className="flex items-center gap-1 font-bold text-slate-700">
@@ -740,8 +738,8 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
                   <div className="text-[10px] text-amber-300 uppercase font-extrabold tracking-wider">
                     Simulasi Hasil
                   </div>
-                  <div className="text-slate-300 text-[11px] truncate">
-                    {currentVariant.size} • {currentVariant.color}
+                  <div className="text-slate-200 text-xs font-bold truncate">
+                    {currentVariant.size} • Warna: <span className="text-amber-300 font-extrabold">{currentVariant.color}</span>
                   </div>
                 </div>
 
@@ -1025,13 +1023,8 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
                       key={v.id}
                       className="px-2 py-0.5 bg-white rounded border border-slate-200 text-[11px] font-bold text-slate-800 flex items-center gap-1 shadow-2xs"
                     >
-                      {v.colorHex && (
-                        <span 
-                          className="w-2 h-2 rounded-full border border-slate-300"
-                          style={{ backgroundColor: v.colorHex }}
-                        />
-                      )}
-                      <span>{v.size} ({v.color})</span>
+                      <span className="font-black text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 text-[11px]">{v.size}</span>
+                      <span>Warna: <strong className="font-black text-slate-950">{v.color}</strong></span>
                       <span className="text-slate-400">•</span>
                       <span className="text-emerald-700 font-extrabold">{v.stock} pcs</span>
                     </span>

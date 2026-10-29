@@ -11,6 +11,7 @@ import {
   Radio, 
   User, 
   ShieldCheck,
+  AlertCircle,
   RefreshCw,
   QrCode,
   Lock,
@@ -936,6 +937,31 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
                     <div className="mt-3 pt-2 border-t border-slate-100 text-[10px] text-emerald-700 font-extrabold">
                       ✓ Real-time &amp; siaga otomatis
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Box Solusi & Bantuan Jika Link Belum Bisa Dibuka di HP Lain */}
+              <div className="p-4 rounded-2xl bg-amber-500/10 border-2 border-amber-300 text-slate-800 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-black text-amber-950 uppercase tracking-wider">
+                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>Solusi Jika Link Tidak Bisa Dibuka di HP / Perangkat Lain:</span>
+                </div>
+
+                <div className="space-y-2 text-xs text-slate-700 leading-relaxed">
+                  <div className="p-2.5 rounded-xl bg-white/90 border border-amber-200">
+                    <strong className="text-slate-900 block font-bold mb-0.5">1. Aktifkan Akses Berbagi di AI Studio (Paling Utama):</strong>
+                    Di pojok kanan atas layar Google AI Studio tempat Anda membuat proyek ini, klik tombol <strong>"Share"</strong> (Bagikan) atau <strong>"Publish"</strong>, lalu ubah izin dari <em>"Restricted"</em> menjadi <strong>"Anyone with the link"</strong> (Siapa saja yang memiliki tautan). Jika masih restricted, server Google akan menolak perangkat lain (HTTP 403 Forbidden).
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-white/90 border border-amber-200">
+                    <strong className="text-slate-900 block font-bold mb-0.5">2. Jika Muncul Layar "Action required to load your app" / "Cookie Check":</strong>
+                    Pada browser HP (terutama Safari iPhone atau Chrome Android), sistem Google meminta izin cookie keamanan. Cukup klik tombol biru <strong>"Authenticate in new window"</strong> atau <strong>"Grant permission"</strong> sekali saja untuk mengizinkan aplikasi memuat.
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-white/90 border border-amber-200">
+                    <strong className="text-slate-900 block font-bold mb-0.5">3. Pasang Sebagai Aplikasi HP (PWA):</strong>
+                    Setelah terbuka di browser HP staf, ketuk menu browser (titik 3 di Chrome atau ikon Bagikan di Safari) lalu pilih <strong>"Tambahkan ke Layar Utama" (Add to Home Screen)</strong> agar aplikasi terbuka fullscreen seperti aplikasi resmi Android / iOS.
                   </div>
                 </div>
               </div>

@@ -178,24 +178,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setPinChangeMsg(null);
 
     // Verify current PIN
-    if (currentPinInput !== settings.securityPin) {
+    const cleanCurrent = currentPinInput.trim();
+    const cleanSaved = String(settings.securityPin || '000000').trim();
+    if (cleanCurrent !== cleanSaved) {
       setPinChangeMsg({ type: 'error', text: 'PIN Lama salah! Tidak dapat mengubah PIN.' });
       return;
     }
 
-    if (newPin.length < 4 || newPin.length > 6) {
-      setPinChangeMsg({ type: 'error', text: 'PIN Baru harus terdiri dari 4 hingga 6 digit angka.' });
+    const cleanNew = newPin.trim();
+    if (cleanNew.length < 4 || cleanNew.length > 8) {
+      setPinChangeMsg({ type: 'error', text: 'PIN Baru harus terdiri dari 4 hingga 8 digit angka.' });
       return;
     }
 
-    if (newPin !== confirmPin) {
+    if (cleanNew !== confirmPin.trim()) {
       setPinChangeMsg({ type: 'error', text: 'Konfirmasi PIN Baru tidak cocok!' });
       return;
     }
 
-    const ok = await updateSettings({ securityPin: newPin });
+    const ok = await updateSettings({ securityPin: cleanNew });
     if (ok) {
-      setPinChangeMsg({ type: 'success', text: `PIN Berhasil Diubah! Harap ingat PIN baru ini.` });
+      setPinChangeMsg({ type: 'success', text: `PIN Berhasil Diubah menjadi "${cleanNew}"! Berlaku di semua perangkat.` });
       setCurrentPinInput('');
       setNewPin('');
       setConfirmPin('');

@@ -139,7 +139,7 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({ isOpen, onClose 
               title="Unduh CSV untuk Excel"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Ekspor CSV</span>
+              <span>Ekspor</span>
             </button>
             <button
               onClick={onClose}

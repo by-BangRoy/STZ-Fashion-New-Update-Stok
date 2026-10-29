@@ -6,15 +6,14 @@ import {
   X, 
   Upload, 
   FileSpreadsheet, 
-  FileText, 
   CheckCircle2, 
   AlertCircle, 
-  Package, 
-  Layers, 
   RefreshCw,
   FileCheck,
   ClipboardPaste,
-  HelpCircle
+  Layers,
+  PlusCircle,
+  RotateCcw
 } from 'lucide-react';
 
 interface UniversalImportModalProps {
@@ -31,9 +30,9 @@ export const UniversalImportModal: React.FC<UniversalImportModalProps> = ({ isOp
   const [pasteText, setPasteText] = useState<string>('');
   const [isParsing, setIsParsing] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [importMode, setImportMode] = useState<'append' | 'replace'>('append');
+  const [importMode, setImportMode] = useState<'update' | 'add' | 'replace'>('update');
   const [errorMessage, setErrorMessage] = useState<string>('');
-  const [successInfo, setSuccessInfo] = useState<{ count: number; totalUnits: number } | null>(null);
+  const [successInfo, setSuccessInfo] = useState<{ count: number; totalUnits: number; updatedCount?: number; addedCount?: number } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -123,13 +122,16 @@ export const UniversalImportModal: React.FC<UniversalImportModalProps> = ({ isOp
       const res = await batchImportProducts(
         parsedProducts,
         importMode === 'replace',
-        sourceFileName || 'Berkas Impor'
+        sourceFileName || 'Berkas Impor',
+        importMode
       );
 
       if (res.success) {
         setSuccessInfo({
           count: res.count,
           totalUnits: res.totalUnits,
+          updatedCount: res.updatedCount,
+          addedCount: res.addedCount,
         });
         setTimeout(() => {
           onClose();
@@ -176,7 +178,7 @@ export const UniversalImportModal: React.FC<UniversalImportModalProps> = ({ isOp
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-black text-slate-950 leading-tight">
-                Impor Data Stok dari Semua File
+                Import & Update Stok dari Semua File
               </h2>
               <p className="text-xs text-slate-900/80 font-medium">
                 Mendukung Excel (.xlsx, .xls), CSV, TSV, TXT, JSON & salin tabel langsung
@@ -240,9 +242,14 @@ export const UniversalImportModal: React.FC<UniversalImportModalProps> = ({ isOp
             <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center gap-3 text-xs animate-in fade-in">
               <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0" />
               <div>
-                <div className="font-black text-sm text-emerald-900">✓ Berhasil Mengimpor Barang!</div>
+                <div className="font-black text-sm text-emerald-900">✓ Berhasil Memproses Stok!</div>
                 <p className="text-emerald-800 mt-0.5">
-                  Berhasil menyimpan <strong>{successInfo.count} model barang</strong> ({successInfo.totalUnits.toLocaleString('id-ID')} unit stok) ke dalam katalog.
+                  Berhasil menyimpan <strong>{successInfo.count} model barang</strong> ({successInfo.totalUnits.toLocaleString('id-ID')} unit stok).
+                  {successInfo.updatedCount !== undefined && successInfo.addedCount !== undefined && (
+                    <span className="block mt-0.5 font-medium text-emerald-900">
+                      ({successInfo.updatedCount} model stok diperbarui, {successInfo.addedCount} produk baru ditambahkan).
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
@@ -358,51 +365,92 @@ export const UniversalImportModal: React.FC<UniversalImportModalProps> = ({ isOp
 
               {/* Import Mode Radio Options */}
               <div className="p-3.5 bg-white rounded-2xl border border-yellow-200/90 space-y-2">
-                <div className="text-xs font-bold text-slate-800">Pilih Mode Pengisian Stok:</div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="text-xs font-bold text-slate-800">Pilih Cara Pembaruan Stok:</div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                  {/* Mode 1: Update Stok (Opname / Set) */}
                   <label
-                    onClick={() => setImportMode('append')}
-                    className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-all ${
-                      importMode === 'append'
+                    onClick={() => setImportMode('update')}
+                    className={`p-3 rounded-xl border flex flex-col justify-between cursor-pointer transition-all ${
+                      importMode === 'update'
                         ? 'bg-amber-50 border-amber-400 text-slate-900 ring-1 ring-amber-300'
                         : 'bg-white border-yellow-200/70 text-slate-600 hover:bg-yellow-50/50'
                     }`}
                   >
-                    <input
-                      type="radio"
-                      name="importMode"
-                      checked={importMode === 'append'}
-                      onChange={() => setImportMode('append')}
-                      className="mt-0.5 text-amber-600 focus:ring-amber-500"
-                    />
-                    <div>
-                      <div className="font-extrabold text-slate-900">Gabungkan / Update Stok (Aman)</div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        Menambahkan produk baru dan memperbarui produk yang namanya cocok tanpa menghapus barang lama.
-                      </p>
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="radio"
+                        name="importMode"
+                        checked={importMode === 'update'}
+                        onChange={() => setImportMode('update')}
+                        className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                      />
+                      <div>
+                        <div className="font-extrabold text-slate-900 flex items-center gap-1">
+                          <Layers className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Update Stok Fisik</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-1">
+                          Menyesuaikan stok barang yang cocok dengan angka terbaru di berkas, dan menambah barang baru.
+                        </p>
+                      </div>
                     </div>
                   </label>
 
+                  {/* Mode 2: Tambah Stok (+Qty / Restock) */}
+                  <label
+                    onClick={() => setImportMode('add')}
+                    className={`p-3 rounded-xl border flex flex-col justify-between cursor-pointer transition-all ${
+                      importMode === 'add'
+                        ? 'bg-emerald-50 border-emerald-400 text-slate-900 ring-1 ring-emerald-300'
+                        : 'bg-white border-yellow-200/70 text-slate-600 hover:bg-yellow-50/50'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="radio"
+                        name="importMode"
+                        checked={importMode === 'add'}
+                        onChange={() => setImportMode('add')}
+                        className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <div>
+                        <div className="font-extrabold text-emerald-950 flex items-center gap-1">
+                          <PlusCircle className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Tambah Stok (+Qty)</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-1">
+                          Menambahkan jumlah unit dari berkas ke stok berjalan sekarang (misal: kiriman barang baru).
+                        </p>
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Mode 3: Ganti Total Katalog */}
                   <label
                     onClick={() => setImportMode('replace')}
-                    className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-all ${
+                    className={`p-3 rounded-xl border flex flex-col justify-between cursor-pointer transition-all ${
                       importMode === 'replace'
                         ? 'bg-rose-50 border-rose-400 text-slate-900 ring-1 ring-rose-300'
                         : 'bg-white border-yellow-200/70 text-slate-600 hover:bg-yellow-50/50'
                     }`}
                   >
-                    <input
-                      type="radio"
-                      name="importMode"
-                      checked={importMode === 'replace'}
-                      onChange={() => setImportMode('replace')}
-                      className="mt-0.5 text-rose-600 focus:ring-rose-500"
-                    />
-                    <div>
-                      <div className="font-extrabold text-rose-950">Ganti Seluruh Katalog</div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        Mengosongkan katalog lama dan mengisi penuh dengan data dari berkas impor baru ini.
-                      </p>
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="radio"
+                        name="importMode"
+                        checked={importMode === 'replace'}
+                        onChange={() => setImportMode('replace')}
+                        className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                      />
+                      <div>
+                        <div className="font-extrabold text-rose-950 flex items-center gap-1">
+                          <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+                          <span>Ganti Total Katalog</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-1">
+                          Mengosongkan katalog lama dan mengisi penuh dengan data berkas baru ini.
+                        </p>
+                      </div>
                     </div>
                   </label>
                 </div>
@@ -487,7 +535,7 @@ export const UniversalImportModal: React.FC<UniversalImportModalProps> = ({ isOp
                 <>
                   <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
                   <span>
-                    Impor Sekarang ({parsedProducts.length} Barang • {totalCalculatedUnits.toLocaleString('id-ID')} Pcs)
+                    {importMode === 'add' ? 'Tambah Stok Masuk' : importMode === 'replace' ? 'Ganti Total Katalog' : 'Update Stok Sekarang'} ({parsedProducts.length} Model • {totalCalculatedUnits.toLocaleString('id-ID')} Pcs)
                   </span>
                 </>
               )}
