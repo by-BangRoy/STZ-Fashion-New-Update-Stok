@@ -389,7 +389,7 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
                           </div>
                         </div>
 
-                        <div className="shrink-0 ml-2">
+                        <div className="shrink-0 ml-2 flex items-center gap-1.5">
                           <span className={`text-[11px] font-black px-2 py-0.5 rounded shadow-xs ${
                             isOut
                               ? 'bg-rose-600 text-white'
@@ -398,6 +398,9 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
                               : 'bg-emerald-100 text-emerald-950 border border-emerald-300'
                           }`}>
                             {isOut ? '0 pcs (HABIS)' : isLow ? `${vStock} pcs (MENIPIS)` : `${vStock} pcs`}
+                          </span>
+                          <span className="text-[10px] font-bold bg-yellow-50 text-slate-700 px-1.5 py-0.5 rounded border border-yellow-200">
+                            {formatLusin(vStock)}
                           </span>
                         </div>
                       </button>
@@ -415,10 +418,10 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
                       {currentVariant.size} • Warna: <span className="text-slate-950 font-black">{currentVariant.color}</span>
                     </span>
                   </div>
-                  <div className="flex items-center gap-1 font-bold text-slate-700">
+                  <div className="flex items-center gap-1.5 font-bold text-slate-700">
                     <span>Stok saat ini:</span>
                     <span className={`font-black ${currentStock === 0 ? 'text-rose-600' : currentStock <= minStock ? 'text-amber-600' : 'text-emerald-700'}`}>
-                      {currentStock} pcs
+                      {currentStock} pcs ({formatLusin(currentStock)})
                     </span>
                   </div>
                 </div>
@@ -561,130 +564,297 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
                 </div>
               </div>
 
-              {/* Stepper & Controls */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider">
-                    {mainMode === 'exact' ? 'Stok Fisik Sebenarnya (Pcs)' : 'Jumlah Pcs yang Diubah'}
-                  </label>
-                  {mainMode !== 'exact' && (
-                    <span className="text-[11px] font-bold text-slate-500">
-                      = {formatLusin(quantity)}
+              {/* Stepper & Controls: Kolom Lusin & Kolom Pcs */}
+              {mainMode !== 'exact' ? (
+                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-slate-800 uppercase tracking-wider">
+                      {mainMode === 'decrease' ? 'Jumlah yang Dikurangi' : 'Jumlah yang Ditambahkan'}
                     </span>
-                  )}
-                </div>
+                    <span className="text-xs font-black text-amber-900 bg-amber-100 px-2.5 py-0.5 rounded-lg border border-amber-300">
+                      Total: {quantity} Pcs ({formatLusin(quantity)})
+                    </span>
+                  </div>
 
-                {mainMode !== 'exact' ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                        className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-90 text-slate-800 font-black flex items-center justify-center transition-all border border-slate-300 shrink-0"
-                        title="Kurang 1"
-                      >
-                        <Minus className="w-4 h-4 stroke-[3]" />
-                      </button>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {/* Kolom Lusin (1 Lusin = 12 Pcs) */}
+                    <div className="bg-white p-2.5 rounded-xl border border-yellow-300/80 shadow-2xs">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-[10px] font-black text-amber-900 uppercase tracking-wider">
+                          Kolom Lusin
+                        </label>
+                        <span className="text-[9px] font-bold text-amber-800 bg-amber-50 px-1 py-0.2 rounded border border-amber-200">
+                          1 Lsn = 12 Pcs
+                        </span>
+                      </div>
 
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const curLusin = Math.floor(quantity / 12);
+                            const curPcs = quantity % 12;
+                            const nextLusin = Math.max(0, curLusin - 1);
+                            const nextQty = Math.max(1, nextLusin * 12 + curPcs);
+                            setQuantity(nextQty);
+                          }}
+                          className="w-8 h-8 rounded-lg bg-amber-50 hover:bg-amber-100 active:scale-90 text-amber-950 font-black flex items-center justify-center transition-all border border-amber-200 shrink-0"
+                          title="Kurang 1 Lusin (-12 pcs)"
+                        >
+                          <Minus className="w-3.5 h-3.5 stroke-[3]" />
+                        </button>
+
+                        <div className="flex-1 relative">
+                          <input
+                            type="number"
+                            min="0"
+                            max="999"
+                            value={Math.floor(quantity / 12)}
+                            onChange={(e) => {
+                              const val = Math.max(0, parseInt(e.target.value) || 0);
+                              const curPcs = quantity % 12;
+                              setQuantity(Math.max(1, val * 12 + curPcs));
+                            }}
+                            className="w-full h-8 text-center text-base font-black text-amber-950 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+                          />
+                          <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 pointer-events-none">
+                            lsn
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const curLusin = Math.floor(quantity / 12);
+                            const curPcs = quantity % 12;
+                            const nextLusin = curLusin + 1;
+                            setQuantity(nextLusin * 12 + curPcs);
+                          }}
+                          className="w-8 h-8 rounded-lg bg-amber-50 hover:bg-amber-100 active:scale-90 text-amber-950 font-black flex items-center justify-center transition-all border border-amber-200 shrink-0"
+                          title="Tambah 1 Lusin (+12 pcs)"
+                        >
+                          <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Kolom Pcs / Satuan */}
+                    <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-[10px] font-black text-slate-700 uppercase tracking-wider">
+                          Kolom Pcs (Satuan)
+                        </label>
+                        <span className="text-[9px] font-bold text-slate-500">
+                          Eceran
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                          className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 active:scale-90 text-slate-800 font-black flex items-center justify-center transition-all border border-slate-300 shrink-0"
+                          title="Kurang 1 pcs"
+                        >
+                          <Minus className="w-3.5 h-3.5 stroke-[3]" />
+                        </button>
+
+                        <div className="flex-1 relative">
+                          <input
+                            type="number"
+                            min="0"
+                            max="9999"
+                            value={quantity % 12}
+                            onChange={(e) => {
+                              const val = Math.max(0, parseInt(e.target.value) || 0);
+                              const curLusin = Math.floor(quantity / 12);
+                              setQuantity(Math.max(1, curLusin * 12 + val));
+                            }}
+                            className="w-full h-8 text-center text-base font-black text-slate-900 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+                          />
+                          <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 pointer-events-none">
+                            pcs
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setQuantity((q) => q + 1)}
+                          className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 active:scale-90 text-slate-800 font-black flex items-center justify-center transition-all border border-slate-300 shrink-0"
+                          title="Tambah 1 pcs"
+                        >
+                          <Plus className="w-4 h-4 stroke-[3]" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Direct Total Pcs input field for convenience */}
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200 text-xs">
+                    <span className="text-[11px] font-semibold text-slate-600">
+                      Atau ketik langsung Total Pcs:
+                    </span>
+                    <div className="flex items-center gap-1.5 w-32">
                       <input
                         type="number"
                         min="1"
-                        max="9999"
+                        max="99999"
                         value={quantity}
                         onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                        className="flex-1 h-10 text-center text-xl font-black text-slate-900 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                        className="w-full h-7 px-2 text-right font-black text-slate-900 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white text-xs"
                       />
-
-                      <button
-                        type="button"
-                        onClick={() => setQuantity((q) => q + 1)}
-                        className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-90 text-slate-800 font-black flex items-center justify-center transition-all border border-slate-300 shrink-0"
-                        title="Tambah 1"
-                      >
-                        <Plus className="w-4 h-4 stroke-[3]" />
-                      </button>
-                    </div>
-
-                    {/* Quick Preset Buttons */}
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">Pilih Cepat:</span>
-                      {[1, 2, 3, 5, 10, 12, 24].map((qtyVal) => (
-                        <button
-                          key={qtyVal}
-                          type="button"
-                          onClick={() => setQuantity(qtyVal)}
-                          className={`text-[11px] px-2 py-0.5 rounded-lg font-bold border transition-all ${
-                            quantity === qtyVal
-                              ? 'bg-amber-500 text-slate-950 border-amber-600 font-black shadow-xs'
-                              : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
-                          }`}
-                        >
-                          {qtyVal === 12 ? '12 (1 Lsn)' : qtyVal === 24 ? '24 (2 Lsn)' : `${qtyVal} pcs`}
-                        </button>
-                      ))}
+                      <span className="text-[11px] font-bold text-slate-600">pcs</span>
                     </div>
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setExactStock((s) => Math.max(0, s - 1))}
-                        className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-90 text-slate-800 font-black flex items-center justify-center transition-all border border-slate-300 shrink-0"
-                      >
-                        <Minus className="w-4 h-4 stroke-[3]" />
-                      </button>
+                </div>
+              ) : (
+                <div className="bg-indigo-50/50 p-3 rounded-2xl border border-indigo-200 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-indigo-950 uppercase tracking-wider">
+                      Set Stok Fisik Riil
+                    </span>
+                    <span className="text-xs font-black text-indigo-950 bg-indigo-100 px-2.5 py-0.5 rounded-lg border border-indigo-300">
+                      Fisik: {exactStock} Pcs ({formatLusin(exactStock)})
+                    </span>
+                  </div>
 
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {/* Kolom Lusin Fisik */}
+                    <div className="bg-white p-2.5 rounded-xl border border-indigo-300 shadow-2xs">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-[10px] font-black text-indigo-950 uppercase tracking-wider">
+                          Kolom Lusin
+                        </label>
+                        <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 px-1 py-0.2 rounded border border-indigo-200">
+                          1 Lsn = 12 Pcs
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const curLusin = Math.floor(exactStock / 12);
+                            const curPcs = exactStock % 12;
+                            const nextLusin = Math.max(0, curLusin - 1);
+                            setExactStock(nextLusin * 12 + curPcs);
+                          }}
+                          className="w-8 h-8 rounded-lg bg-indigo-50 hover:bg-indigo-100 active:scale-90 text-indigo-950 font-black flex items-center justify-center transition-all border border-indigo-200 shrink-0"
+                          title="Kurang 1 Lusin (-12 pcs)"
+                        >
+                          <Minus className="w-3.5 h-3.5 stroke-[3]" />
+                        </button>
+
+                        <div className="flex-1 relative">
+                          <input
+                            type="number"
+                            min="0"
+                            max="999"
+                            value={Math.floor(exactStock / 12)}
+                            onChange={(e) => {
+                              const val = Math.max(0, parseInt(e.target.value) || 0);
+                              const curPcs = exactStock % 12;
+                              setExactStock(val * 12 + curPcs);
+                            }}
+                            className="w-full h-8 text-center text-base font-black text-indigo-950 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                          />
+                          <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 pointer-events-none">
+                            lsn
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const curLusin = Math.floor(exactStock / 12);
+                            const curPcs = exactStock % 12;
+                            const nextLusin = curLusin + 1;
+                            setExactStock(nextLusin * 12 + curPcs);
+                          }}
+                          className="w-8 h-8 rounded-lg bg-indigo-50 hover:bg-indigo-100 active:scale-90 text-indigo-950 font-black flex items-center justify-center transition-all border border-indigo-200 shrink-0"
+                          title="Tambah 1 Lusin (+12 pcs)"
+                        >
+                          <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Kolom Pcs Fisik (Satuan) */}
+                    <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-[10px] font-black text-slate-700 uppercase tracking-wider">
+                          Kolom Pcs (Satuan)
+                        </label>
+                        <span className="text-[9px] font-bold text-slate-500">
+                          Eceran
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setExactStock((s) => Math.max(0, s - 1))}
+                          className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 active:scale-90 text-slate-800 font-black flex items-center justify-center transition-all border border-slate-300 shrink-0"
+                          title="Kurang 1 pcs"
+                        >
+                          <Minus className="w-3.5 h-3.5 stroke-[3]" />
+                        </button>
+
+                        <div className="flex-1 relative">
+                          <input
+                            type="number"
+                            min="0"
+                            max="9999"
+                            value={exactStock % 12}
+                            onChange={(e) => {
+                              const val = Math.max(0, parseInt(e.target.value) || 0);
+                              const curLusin = Math.floor(exactStock / 12);
+                              setExactStock(curLusin * 12 + val);
+                            }}
+                            className="w-full h-8 text-center text-base font-black text-slate-900 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                          />
+                          <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 pointer-events-none">
+                            pcs
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setExactStock((s) => s + 1)}
+                          className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 active:scale-90 text-slate-800 font-black flex items-center justify-center transition-all border border-slate-300 shrink-0"
+                          title="Tambah 1 pcs"
+                        >
+                          <Plus className="w-4 h-4 stroke-[3]" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Direct Total Pcs input field and Clear/Zero button */}
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-indigo-200/80 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setExactStock(0)}
+                      className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors"
+                    >
+                      Set Stok 0 (Habis)
+                    </button>
+
+                    <div className="flex items-center gap-1.5 w-36">
+                      <span className="text-[11px] text-slate-600 whitespace-nowrap">Total Pcs:</span>
                       <input
                         type="number"
                         min="0"
-                        max="9999"
+                        max="99999"
                         value={exactStock}
                         onChange={(e) => setExactStock(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="flex-1 h-10 text-center text-xl font-black text-slate-900 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        className="w-full h-7 px-2 text-right font-black text-slate-900 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-xs"
                       />
-
-                      <button
-                        type="button"
-                        onClick={() => setExactStock((s) => s + 1)}
-                        className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-90 text-slate-800 font-black flex items-center justify-center transition-all border border-slate-300 shrink-0"
-                      >
-                        <Plus className="w-4 h-4 stroke-[3]" />
-                      </button>
-                    </div>
-
-                    {/* Quick Exact Preset Buttons */}
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">Set Fisik:</span>
-                      <button
-                        type="button"
-                        onClick={() => setExactStock(0)}
-                        className={`text-[11px] px-2.5 py-0.5 rounded-lg font-bold border transition-all ${
-                          exactStock === 0
-                            ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
-                            : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                        }`}
-                      >
-                        0 (HABIS)
-                      </button>
-                      {[1, 2, 5, 10, 12, 20, 50, 100].map((numVal) => (
-                        <button
-                          key={numVal}
-                          type="button"
-                          onClick={() => setExactStock(numVal)}
-                          className={`text-[11px] px-2 py-0.5 rounded-lg font-bold border transition-all ${
-                            exactStock === numVal
-                              ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
-                              : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
-                          }`}
-                        >
-                          {numVal} pcs
-                        </button>
-                      ))}
+                      <span className="text-[11px] font-bold text-slate-600">pcs</span>
                     </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Optional Note / Invoice */}
               <div>
@@ -693,7 +863,7 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
                     {subReason === 'damage' ? 'Alasan / Jenis Kerusakan' : 'Catatan / No. Nota (Opsional)'}
                   </label>
                   {subReason === 'damage' && (
-                    <span className="text-[10px] text-rose-600 font-extrabold">Pilih cepat jenis cacat:</span>
+                    <span className="text-[10px] text-rose-600 font-extrabold">Pilih jenis cacat:</span>
                   )}
                 </div>
 

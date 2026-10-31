@@ -147,11 +147,11 @@ export const PinLockScreen: React.FC = () => {
           <button
             type="button"
             onClick={() => setShowDigits(!showDigits)}
-            className="text-xs text-slate-400 hover:text-amber-300 flex items-center gap-1 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800"
-            title={showDigits ? 'Sembunyikan Digit' : 'Lihat Digit'}
+            className="text-slate-400 hover:text-amber-300 p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+            title={showDigits ? 'Sembunyikan digit' : 'Tampilkan digit'}
+            aria-label={showDigits ? 'Sembunyikan digit' : 'Tampilkan digit'}
           >
-            {showDigits ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-            <span className="text-[11px]">{showDigits ? 'Tutup' : 'Lihat'}</span>
+            {showDigits ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         </div>
 

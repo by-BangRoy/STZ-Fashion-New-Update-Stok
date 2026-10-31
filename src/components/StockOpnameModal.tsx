@@ -13,6 +13,7 @@ import {
   Download
 } from 'lucide-react';
 import { exportInventoryToCSV } from '../utils/csvExport.ts';
+import { formatLusin } from '../utils/formatters.ts';
 
 interface StockOpnameModalProps {
   isOpen: boolean;
@@ -201,7 +202,9 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({ isOpen, onCl
                 <th className="py-2.5 px-3">Nama Barang</th>
                 <th className="py-2.5 px-3">Varian</th>
                 <th className="py-2.5 px-3 text-center">Stok Sistem</th>
-                <th className="py-2.5 px-3 text-center">Stok Fisik Dihitung</th>
+                <th className="py-2.5 px-3 text-center">Fisik (Lusin)</th>
+                <th className="py-2.5 px-3 text-center">Fisik (Pcs)</th>
+                <th className="py-2.5 px-3 text-center">Total Fisik</th>
                 <th className="py-2.5 px-3 text-center">Selisih</th>
               </tr>
             </thead>
@@ -209,6 +212,8 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({ isOpen, onCl
               {filteredEntries.map((entry) => {
                 const delta = entry.actualStock - entry.systemStock;
                 const hasDiff = delta !== 0;
+                const curLusin = Math.floor(entry.actualStock / 12);
+                const curPcs = entry.actualStock % 12;
 
                 return (
                   <tr
@@ -219,26 +224,55 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({ isOpen, onCl
                   >
                     <td className="py-2.5 px-3 font-bold text-slate-900">{entry.productName}</td>
                     <td className="py-2.5 px-3 text-slate-600">{entry.variantDesc}</td>
-                    <td className="py-2.5 px-3 text-center font-bold text-slate-700">
-                      {entry.systemStock} pcs
-                    </td>
                     <td className="py-2.5 px-3 text-center">
-                      <input
-                        type="number"
-                        min="0"
-                        value={entry.actualStock}
-                        onChange={(e) =>
-                          handleActualStockChange(
-                            entry.variantId,
-                            parseInt(e.target.value) || 0
-                          )
-                        }
-                        className={`w-20 text-center font-black py-1 px-2 border rounded-lg text-sm ${
-                          hasDiff
-                            ? 'border-amber-400 bg-white text-amber-900 ring-2 ring-amber-300/40'
-                            : 'border-slate-300 bg-white text-slate-800'
-                        }`}
-                      />
+                      <div className="font-bold text-slate-800">{entry.systemStock} pcs</div>
+                      <div className="text-[10px] text-slate-500 font-semibold">{formatLusin(entry.systemStock)}</div>
+                    </td>
+                    {/* Kolom Lusin */}
+                    <td className="py-2.5 px-3 text-center">
+                      <div className="inline-flex items-center gap-1">
+                        <input
+                          type="number"
+                          min="0"
+                          value={curLusin}
+                          onChange={(e) => {
+                            const val = Math.max(0, parseInt(e.target.value) || 0);
+                            handleActualStockChange(entry.variantId, val * 12 + curPcs);
+                          }}
+                          className={`w-16 text-center font-black py-1 px-1.5 border rounded-lg text-xs ${
+                            hasDiff
+                              ? 'border-amber-400 bg-white text-amber-950 ring-1 ring-amber-300'
+                              : 'border-slate-300 bg-white text-slate-800'
+                          }`}
+                        />
+                        <span className="text-[10px] font-bold text-slate-400">lsn</span>
+                      </div>
+                    </td>
+                    {/* Kolom Pcs Satuan */}
+                    <td className="py-2.5 px-3 text-center">
+                      <div className="inline-flex items-center gap-1">
+                        <input
+                          type="number"
+                          min="0"
+                          value={curPcs}
+                          onChange={(e) => {
+                            const val = Math.max(0, parseInt(e.target.value) || 0);
+                            handleActualStockChange(entry.variantId, curLusin * 12 + val);
+                          }}
+                          className={`w-16 text-center font-black py-1 px-1.5 border rounded-lg text-xs ${
+                            hasDiff
+                              ? 'border-amber-400 bg-white text-amber-950 ring-1 ring-amber-300'
+                              : 'border-slate-300 bg-white text-slate-800'
+                          }`}
+                        />
+                        <span className="text-[10px] font-bold text-slate-400">pcs</span>
+                      </div>
+                    </td>
+                    {/* Total Fisik */}
+                    <td className="py-2.5 px-3 text-center">
+                      <span className="font-black text-xs text-slate-900 bg-white px-2 py-1 rounded border border-slate-200 shadow-2xs">
+                        {entry.actualStock} pcs
+                      </span>
                     </td>
                     <td className="py-2.5 px-3 text-center whitespace-nowrap">
                       {hasDiff ? (

@@ -4,6 +4,17 @@ import { WebSocketServer, WebSocket } from 'ws';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  setDoc, 
+  deleteDoc, 
+  writeBatch 
+} from 'firebase/firestore';
 import { INITIAL_PRODUCTS } from './src/data/initialData.ts';
 import type { Product, StockLog, RealtimeMessage, DeviceInfo, AppSettings } from './src/types/inventory.ts';
 import { parseDeviceUserAgent, formatIpAddress } from './src/utils/deviceParser.ts';
@@ -20,6 +31,22 @@ const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+// Initialize Firebase Firestore for cloud persistence across cold-starts & multi-device sync
+const FIREBASE_CONFIG_PATH = path.join(__dirname, 'firebase-applet-config.json');
+let firebaseDb: any = null;
+if (fs.existsSync(FIREBASE_CONFIG_PATH)) {
+  try {
+    const rawConfig = JSON.parse(fs.readFileSync(FIREBASE_CONFIG_PATH, 'utf-8'));
+    const fbApp = !getApps().length ? initializeApp(rawConfig) : getApp();
+    firebaseDb = rawConfig.firestoreDatabaseId && rawConfig.firestoreDatabaseId !== '(default)'
+      ? getFirestore(fbApp, rawConfig.firestoreDatabaseId)
+      : getFirestore(fbApp);
+    console.log('[Server] Firebase Firestore connected successfully for 24/7 cloud persistence');
+  } catch (err) {
+    console.warn('[Server] Could not initialize Firebase Firestore:', err);
+  }
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -143,7 +170,114 @@ function saveLogs() {
   }
 }
 
+// Background Cloud Sync Helpers
+async function syncProductToCloud(product: Product) {
+  if (!firebaseDb) return;
+  try {
+    await setDoc(doc(firebaseDb, 'products', product.id), product, { merge: true });
+  } catch (err) {
+    console.warn('[Server] Error syncing product to Firestore:', err);
+  }
+}
+
+async function deleteProductFromCloud(productId: string) {
+  if (!firebaseDb) return;
+  try {
+    await deleteDoc(doc(firebaseDb, 'products', productId));
+  } catch (err) {
+    console.warn('[Server] Error deleting product from Firestore:', err);
+  }
+}
+
+async function saveLogToCloud(log: StockLog) {
+  if (!firebaseDb) return;
+  try {
+    await setDoc(doc(firebaseDb, 'stockLogs', log.id), log, { merge: true });
+  } catch (err) {
+    console.warn('[Server] Error saving log to Firestore:', err);
+  }
+}
+
+async function saveSettingsToCloud(settings: AppSettings) {
+  if (!firebaseDb) return;
+  try {
+    await setDoc(doc(firebaseDb, 'settings', 'current'), settings, { merge: true });
+  } catch (err) {
+    console.warn('[Server] Error saving settings to Firestore:', err);
+  }
+}
+
+async function batchSyncProductsToCloud(prods: Product[], logs?: StockLog[]) {
+  if (!firebaseDb) return;
+  try {
+    const ops: Array<{ ref: any; data: any }> = [];
+    for (const p of prods) {
+      ops.push({ ref: doc(firebaseDb, 'products', p.id), data: p });
+    }
+    if (logs && logs.length > 0) {
+      for (const l of logs) {
+        ops.push({ ref: doc(firebaseDb, 'stockLogs', l.id), data: l });
+      }
+    }
+    const CHUNK = 400;
+    for (let i = 0; i < ops.length; i += CHUNK) {
+      const chunk = ops.slice(i, i + CHUNK);
+      const batch = writeBatch(firebaseDb);
+      for (const op of chunk) {
+        batch.set(op.ref, op.data, { merge: true });
+      }
+      await batch.commit();
+    }
+  } catch (err) {
+    console.warn('[Server] Batch sync to Firestore error:', err);
+  }
+}
+
+async function syncFromFirestoreOnStartup() {
+  if (!firebaseDb) return;
+  try {
+    const snap = await getDocs(collection(firebaseDb, 'products'));
+    const cloudProducts: Product[] = [];
+    snap.forEach((d) => {
+      const p = d.data() as Product;
+      if (p && p.id) cloudProducts.push(p);
+    });
+
+    if (cloudProducts.length > 0) {
+      products = cloudProducts;
+      saveInventory();
+      console.log(`[Server] Synced ${products.length} products from Cloud Firestore`);
+    }
+
+    const logsSnap = await getDocs(collection(firebaseDb, 'stockLogs'));
+    const cloudLogs: StockLog[] = [];
+    logsSnap.forEach((d) => {
+      const l = d.data() as StockLog;
+      if (l && l.id) cloudLogs.push(l);
+    });
+    if (cloudLogs.length > 0) {
+      cloudLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      stockLogs = cloudLogs.slice(0, 500);
+      saveLogs();
+      console.log(`[Server] Synced ${stockLogs.length} logs from Cloud Firestore`);
+    }
+
+    const settingsDoc = await getDoc(doc(firebaseDb, 'settings', 'current'));
+    if (settingsDoc.exists()) {
+      const cloudSettings = settingsDoc.data() as AppSettings;
+      if (cloudSettings) {
+        appSettings = { ...DEFAULT_SETTINGS, ...cloudSettings };
+        saveSettings();
+        console.log('[Server] Synced settings from Cloud Firestore');
+      }
+    }
+  } catch (err) {
+    console.warn('[Server] Startup sync from Firestore error:', err);
+  }
+}
+
 loadData();
+syncFromFirestoreOnStartup().catch(() => {});
 
 const app = express();
 app.use((req, res, next) => {
@@ -156,6 +290,17 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json());
+
+// Ultra-fast Health endpoint for zero-latency standby wake checks
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    productsCount: Array.isArray(products) ? products.length : 0,
+    logsCount: Array.isArray(stockLogs) ? stockLogs.length : 0,
+  });
+});
 
 function extractClientIp(req: http.IncomingMessage): string {
   const forwarded = req.headers['x-forwarded-for'];
@@ -406,6 +551,8 @@ app.post('/api/stock/adjust', (req, res) => {
   stockLogs.unshift(newLog);
   saveInventory();
   saveLogs();
+  syncProductToCloud(product).catch(() => {});
+  saveLogToCloud(newLog).catch(() => {});
 
   const isOutOfStock = newStock === 0 || product.totalStock === 0;
   const isLowStock = !isOutOfStock && newStock <= vMin;
@@ -487,6 +634,7 @@ app.post('/api/stock/batch', (req, res) => {
   stockLogs.unshift(...createdLogs);
   saveInventory();
   saveLogs();
+  batchSyncProductsToCloud(affectedProducts, createdLogs).catch(() => {});
 
   broadcast({
     type: 'BATCH_RESTOCK',
@@ -566,6 +714,8 @@ app.post('/api/products', (req, res) => {
   };
   stockLogs.unshift(log);
   saveLogs();
+  syncProductToCloud(newProduct).catch(() => {});
+  saveLogToCloud(log).catch(() => {});
 
   broadcast({
     type: 'PRODUCT_CREATED',
@@ -736,6 +886,7 @@ app.post('/api/products/batch-import', (req, res) => {
 
   stockLogs.unshift(batchLog);
   saveLogs();
+  batchSyncProductsToCloud(products, [batchLog]).catch(() => {});
 
   // Broadcast to all clients
   broadcast({
@@ -841,6 +992,8 @@ app.put('/api/products/:id', (req, res) => {
 
   stockLogs.unshift(log);
   saveLogs();
+  syncProductToCloud(updatedProduct).catch(() => {});
+  saveLogToCloud(log).catch(() => {});
 
   broadcast({
     type: 'PRODUCT_UPDATED',
@@ -863,6 +1016,7 @@ app.delete('/api/products/:id', (req, res) => {
 
   const removed = products.splice(productIndex, 1)[0];
   saveInventory();
+  deleteProductFromCloud(id).catch(() => {});
 
   broadcast({
     type: 'PRODUCT_DELETED',
@@ -893,6 +1047,7 @@ app.post('/api/settings', (req, res) => {
     },
   };
   saveSettings();
+  saveSettingsToCloud(appSettings).catch(() => {});
 
   broadcast({
     type: 'SETTINGS_UPDATED',

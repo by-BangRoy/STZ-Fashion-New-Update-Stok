@@ -137,6 +137,79 @@ function getInitialDeviceProfile() {
   return { deviceId, deviceName, operatorName, ip: cachedIp };
 }
 
+// Resilient Fetch with AbortController timeout so requests never hang during standby or network transitions
+export async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 5000): Promise<Response | null> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return res;
+  } catch {
+    clearTimeout(id);
+    return null;
+  }
+}
+
+// Offline / Standby Mutation Queue to guarantee zero lost activities
+interface PendingMutationItem {
+  id: string;
+  type: string;
+  endpoint: string;
+  payload: any;
+  timestamp: string;
+}
+
+function getPendingMutations(): PendingMutationItem[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem('stz_pending_mutations');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+function enqueuePendingMutation(item: PendingMutationItem) {
+  if (typeof window === 'undefined') return;
+  try {
+    const list = getPendingMutations();
+    list.push(item);
+    localStorage.setItem('stz_pending_mutations', JSON.stringify(list.slice(-50)));
+  } catch {}
+}
+
+async function processPendingMutationsQueue() {
+  if (typeof window === 'undefined') return;
+  const list = getPendingMutations();
+  if (list.length === 0) return;
+
+  const remaining: PendingMutationItem[] = [];
+  for (const item of list) {
+    try {
+      const res = await fetchWithTimeout(item.endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item.payload),
+      }, 4000);
+      if (!res || !res.ok) {
+        remaining.push(item);
+      }
+    } catch {
+      remaining.push(item);
+    }
+  }
+  try {
+    if (remaining.length > 0) {
+      localStorage.setItem('stz_pending_mutations', JSON.stringify(remaining));
+    } else {
+      localStorage.removeItem('stz_pending_mutations');
+    }
+  } catch {}
+}
+
 async function safeParseJson<T = any>(res: Response | null | undefined): Promise<T | null> {
   if (!res || !res.ok) return null;
   const contentType = res.headers.get('content-type') || '';
@@ -289,8 +362,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
-  // Auth & PIN functions
-  // Auth & PIN functions: accessible by any device that enters the correct PIN
+  // Auth & PIN functions: accessible by any device that enters the correct PIN (instant offline & standby)
   const unlockWithPin = async (inputPin: string): Promise<{ success: boolean; error?: string }> => {
     const cleanInput = String(inputPin || '').trim();
     if (!cleanInput) {
@@ -319,13 +391,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return markSuccess();
     }
 
-    // 2. Server verification
+    const cachedPin = typeof window !== 'undefined' ? localStorage.getItem('stz_authenticated_pin') : null;
+    if (cachedPin && cleanInput === cachedPin.trim()) {
+      return markSuccess();
+    }
+
+    // 2. Server verification with fast timeout so it never hangs on cold start
     try {
-      const res = await fetch('/api/auth/verify-pin', {
+      const res = await fetchWithTimeout('/api/auth/verify-pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin: cleanInput }),
-      }).catch(() => null);
+      }, 3000).catch(() => null);
 
       const data = await safeParseJson<{ success: boolean; message?: string }>(res);
       if (data && data.success) {
@@ -333,11 +410,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     } catch {}
 
-    // 3. Direct Cloud Firestore Settings Document check (if PIN was changed from another device while server was idle)
+    // 3. Direct Cloud Firestore Settings Document check with 3s timeout
     try {
-      const snap = await getDoc(doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID));
-      if (snap.exists()) {
-        const cloudSettings = snap.data() as AppSettings;
+      const snapPromise = getDoc(doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID));
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+      const snap = await Promise.race([snapPromise, timeoutPromise]);
+      if (snap && (snap as any).exists && (snap as any).exists()) {
+        const cloudSettings = (snap as any).data() as AppSettings;
         if (cloudSettings && String(cloudSettings.securityPin || '').trim() === cleanInput) {
           return markSuccess(cloudSettings);
         }
@@ -383,15 +462,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }, 6000);
   }, []);
 
-  // Fetch full inventory, logs & settings via REST
+  // Fetch full inventory, logs & settings via REST with non-blocking timeouts
   const refreshData = useCallback(async (manual = false) => {
     if (manual) setIsRefreshing(true);
     try {
       const [resInv, resLogs, resSettings, resDevices] = await Promise.all([
-        fetch('/api/inventory').catch(() => null),
-        fetch('/api/logs').catch(() => null),
-        fetch('/api/settings').catch(() => null),
-        fetch('/api/devices').catch(() => null),
+        fetchWithTimeout('/api/inventory', {}, 5000).catch(() => null),
+        fetchWithTimeout('/api/logs', {}, 5000).catch(() => null),
+        fetchWithTimeout('/api/settings', {}, 5000).catch(() => null),
+        fetchWithTimeout('/api/devices', {}, 4000).catch(() => null),
       ]);
 
       const invData = await safeParseJson<{ products: Product[] }>(resInv);
@@ -399,14 +478,21 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const incoming: Product[] = invData.products;
         setProducts(prev => {
           if (incoming.length === 0) {
-            if (prev.length > 0) {
-              // Server woke up empty from standby: restore server storage from client cache
-              fetch('/api/inventory/sync-backup', {
+            const wasExplicitlyEmpty = typeof window !== 'undefined' && localStorage.getItem('stz_explicitly_empty') === 'true';
+            if (prev.length > 0 && !wasExplicitlyEmpty) {
+              // Local has products but server returned empty array (e.g. fresh container on Cloud Run cold-start)
+              // Restore backup to server to prevent data loss!
+              fetchWithTimeout('/api/inventory/sync-backup', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ clientProducts: prev, force: true }),
-              }).catch(() => {});
+              }, 5000).catch(() => {});
               return prev;
+            }
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.removeItem('stz_saved_products');
+              } catch (e) {}
             }
             return [];
           }
@@ -445,6 +531,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             if (typeof window !== 'undefined') {
               try {
                 localStorage.setItem('stz_saved_products', JSON.stringify(mapped));
+                localStorage.removeItem('stz_explicitly_empty');
               } catch (e) {}
             }
             return mapped;
@@ -487,6 +574,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       }
 
+      // Check and process any queued offline mutations
+      processPendingMutationsQueue().catch(() => {});
+
       if (manual) {
         playChime('sale');
       }
@@ -494,7 +584,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       console.warn('Refresh data from server status:', err);
     } finally {
       if (manual) {
-        setTimeout(() => setIsRefreshing(false), 500);
+        setTimeout(() => setIsRefreshing(false), 300);
       }
     }
   }, []);
@@ -693,6 +783,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       case 'ALL_PRODUCTS_DELETED': {
         setProducts([]);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.removeItem('stz_saved_products');
+          } catch (e) {}
+        }
         if (msg.payload?.log) {
           setStockLogs(prev => [msg.payload.log, ...prev]);
         }
@@ -990,7 +1085,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       refreshData();
     }, 25000);
 
-    // Auto-reconnect & resync immediately when user wakes up screen, unlocks phone, or refocuses tab
+    // Auto-reconnect, ping health & flush mutations immediately when user wakes up screen, unlocks phone, or refocuses tab
     const handleWakeOrFocus = () => {
       if (typeof document !== 'undefined' && (document.visibilityState === 'visible' || document.visibilityState === undefined)) {
         if (reconnectTimeoutRef.current) {
@@ -998,7 +1093,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           reconnectTimeoutRef.current = null;
         }
         reconnectAttemptsRef.current = 0;
-        // If waking up from background or long standby, immediately check localStorage
+
+        // 1. Instant check from localStorage (0ms latency, never blank)
         if (typeof window !== 'undefined') {
           try {
             const cachedProd = localStorage.getItem('stz_saved_products');
@@ -1011,7 +1107,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           } catch {}
         }
 
-        // Silent background refresh
+        // 2. Ultra-fast ping to wake server from idle/standby
+        fetchWithTimeout('/api/health', {}, 3000).catch(() => {});
+
+        // 3. Flush any pending offline mutations
+        processPendingMutationsQueue().catch(() => {});
+
+        // 4. Silent background refresh (non-blocking)
         refreshData();
 
         const now = Date.now();
@@ -1031,6 +1133,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       }
     };
+
+    // Deep Sleep & Standby Watchdog: detects system clock jumps when device was asleep
+    let lastTick = Date.now();
+    const sleepWatchdogInterval = setInterval(() => {
+      const now = Date.now();
+      const elapsed = now - lastTick;
+      lastTick = now;
+      if (elapsed > 3500) {
+        // Device or tab was sleeping / in deep standby!
+        handleWakeOrFocus();
+      }
+    }, 1000);
 
     document.addEventListener('visibilitychange', handleWakeOrFocus);
     window.addEventListener('focus', handleWakeOrFocus);
@@ -1052,13 +1166,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             const item = d.data() as Product;
             if (item && item.id) list.push(item);
           });
-          if (list.length > 0) {
-            setProducts(list);
-            if (typeof window !== 'undefined') {
-              try {
+          setProducts(list);
+          if (typeof window !== 'undefined') {
+            try {
+              if (list.length > 0) {
                 localStorage.setItem('stz_saved_products', JSON.stringify(list));
-              } catch (e) {}
-            }
+              } else {
+                localStorage.removeItem('stz_saved_products');
+              }
+            } catch (e) {}
           }
         }, (err) => {
           console.warn('[Firestore] Products real-time listener notice:', err);
@@ -1109,6 +1225,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (unsubSettings) unsubSettings();
       clearInterval(fallbackPollInterval);
       clearInterval(gentleSanitySync);
+      clearInterval(sleepWatchdogInterval);
       document.removeEventListener('visibilitychange', handleWakeOrFocus);
       window.removeEventListener('focus', handleWakeOrFocus);
       window.removeEventListener('pageshow', handleWakeOrFocus);
@@ -1259,6 +1376,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setProducts([]);
       if (typeof window !== 'undefined') {
         localStorage.removeItem('stz_saved_products');
+        localStorage.setItem('stz_explicitly_empty', 'true');
       }
       await clearAllProductsFromFirestore().catch(() => {});
       for (const p of oldProducts) {
@@ -1319,7 +1437,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
-  // Stock Mutations Actions
+  // Stock Mutations Actions - Optimistic & Resilient with Offline Queue
   const adjustStock = async (
     productId: string,
     variantId: string,
@@ -1327,68 +1445,151 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     changeType: StockChangeType = 'adjustment',
     reason: string = ''
   ): Promise<boolean> => {
-    try {
-      const response = await fetch('/api/stock/adjust', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          productId,
-          variantId,
-          delta,
-          changeType,
-          reason,
+    const timestamp = new Date().toISOString();
+    const numDelta = Number(delta) || 0;
+
+    // 1. Optimistic calculation
+    const targetProduct = products.find(p => p.id === productId);
+    let clonedProduct: Product | null = null;
+    let newLog: StockLog | null = null;
+
+    if (targetProduct) {
+      const targetVariant = targetProduct.variants.find(v => v.id === variantId);
+      const previousStock = targetVariant ? Number(targetVariant.stock) || 0 : 0;
+      const newStock = Math.max(0, previousStock + numDelta);
+
+      const updatedVariants = targetProduct.variants.map(v => 
+        v.id === variantId ? { ...v, stock: newStock } : { ...v }
+      );
+      const newTotalStock = updatedVariants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+
+      clonedProduct = {
+        ...targetProduct,
+        variants: updatedVariants,
+        totalStock: newTotalStock,
+        updatedAt: timestamp,
+        lastUpdatedBy: {
           deviceId: currentDevice.deviceId,
           deviceName: currentDevice.deviceName,
           operatorName: currentDevice.operatorName,
-        }),
-      });
+        },
+      };
 
-      if (!response.ok) {
-        throw new Error('Gagal memperbarui stok di server');
-      }
+      newLog = {
+        id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        timestamp,
+        productId: targetProduct.id,
+        productName: targetProduct.name,
+        variantId: targetVariant ? targetVariant.id : variantId,
+        variantDescription: targetVariant ? `${targetVariant.size} • Warna: ${targetVariant.color}` : 'Penyesuaian Stok',
+        changeType,
+        delta: numDelta,
+        previousStock,
+        newStock,
+        reason,
+        deviceId: currentDevice.deviceId,
+        deviceName: currentDevice.deviceName,
+        operatorName: currentDevice.operatorName,
+      };
 
-      const data = await response.json();
-      if (data.product) {
-        const clonedProduct: Product = {
-          ...data.product,
-          variants: data.product.variants.map((v: any) => ({ ...v })),
-        };
-        setProducts(prev => prev.map(p => (p.id === clonedProduct.id ? clonedProduct : p)));
-
-        if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      // 2. Immediate state & storage updates (0ms delay)
+      setProducts(prev => {
+        const next = prev.map(p => (p.id === clonedProduct!.id ? clonedProduct! : p));
+        if (typeof window !== 'undefined') {
           try {
-            const bc = new BroadcastChannel('stz_inventory_channel');
-            bc.postMessage({
-              type: 'STOCK_UPDATED',
-              payload: {
-                product: clonedProduct,
-                log: data.log,
-                isLowStock: clonedProduct.variants.some((v: any) => v.stock <= v.minStock && v.stock > 0),
-                isOutOfStock: clonedProduct.totalStock === 0,
-              },
-              meta: {
-                deviceId: currentDevice.deviceId,
-                deviceName: currentDevice.deviceName,
-                operatorName: currentDevice.operatorName,
-                timestamp: new Date().toISOString(),
-              },
-            });
-            bc.close();
+            localStorage.setItem('stz_saved_products', JSON.stringify(next));
+            localStorage.removeItem('stz_explicitly_empty');
           } catch (e) {}
         }
+        return next;
+      });
+
+      setStockLogs(prev => {
+        const next = [newLog!, ...prev.filter(l => l.id !== newLog!.id)].slice(0, 100);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('stz_saved_logs', JSON.stringify(next));
+          } catch (e) {}
+        }
+        return next;
+      });
+
+      // 3. Local BroadcastChannel cross-tab sync
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        try {
+          const bc = new BroadcastChannel('stz_inventory_channel');
+          bc.postMessage({
+            type: 'STOCK_UPDATED',
+            payload: {
+              product: clonedProduct,
+              log: newLog,
+              isLowStock: clonedProduct.variants.some((v: any) => v.stock <= v.minStock && v.stock > 0),
+              isOutOfStock: clonedProduct.totalStock === 0,
+            },
+            meta: {
+              deviceId: currentDevice.deviceId,
+              deviceName: currentDevice.deviceName,
+              operatorName: currentDevice.operatorName,
+              timestamp,
+            },
+          });
+          bc.close();
+        } catch (e) {}
       }
-      if (data.log) {
-        setStockLogs(prev => [data.log, ...prev.filter(l => l.id !== data.log.id)]);
-        saveLogToFirestore(data.log).catch((err) => console.warn('[Firestore] Log sync notice:', err));
-      }
-      if (data.product) {
-        syncProductToFirestore(data.product).catch((err) => console.warn('[Firestore] Product sync notice:', err));
-      }
-      return true;
-    } catch (err) {
-      console.error('Error adjusting stock:', err);
-      return false;
+
+      // 4. Direct Cloud Firestore sync
+      syncProductToFirestore(clonedProduct).catch((err) => console.warn('[Firestore] Product sync notice:', err));
+      saveLogToFirestore(newLog).catch((err) => console.warn('[Firestore] Log sync notice:', err));
     }
+
+    // 5. Send to Server with fallback queue
+    const payload = {
+      productId,
+      variantId,
+      delta: numDelta,
+      changeType,
+      reason,
+      deviceId: currentDevice.deviceId,
+      deviceName: currentDevice.deviceName,
+      operatorName: currentDevice.operatorName,
+    };
+
+    try {
+      const response = await fetchWithTimeout('/api/stock/adjust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }, 5000);
+
+      if (!response || !response.ok) {
+        enqueuePendingMutation({
+          id: `mut-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          type: 'adjust',
+          endpoint: '/api/stock/adjust',
+          payload,
+          timestamp,
+        });
+      } else {
+        const data = await response.json().catch(() => null);
+        if (data && data.product) {
+          const serverProduct: Product = {
+            ...data.product,
+            variants: data.product.variants.map((v: any) => ({ ...v })),
+          };
+          setProducts(prev => prev.map(p => (p.id === serverProduct.id ? serverProduct : p)));
+        }
+      }
+    } catch {
+      enqueuePendingMutation({
+        id: `mut-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        type: 'adjust',
+        endpoint: '/api/stock/adjust',
+        payload,
+        timestamp,
+      });
+    }
+
+    return true;
   };
 
   const batchAdjustStock = async (
@@ -1400,99 +1601,258 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       reason?: string;
     }>
   ): Promise<boolean> => {
-    try {
-      const response = await fetch('/api/stock/batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items,
+    const timestamp = new Date().toISOString();
+    const affectedProducts: Product[] = [];
+    const createdLogs: StockLog[] = [];
+
+    // 1. Optimistic computation
+    for (const item of items) {
+      const product = products.find(p => p.id === item.productId);
+      if (!product) continue;
+      const variant = product.variants.find(v => v.id === item.variantId);
+      if (!variant) continue;
+
+      const previousStock = Number(variant.stock) || 0;
+      const numDelta = typeof item.delta === 'number' ? item.delta : Number(item.delta) || 0;
+      const newStock = Math.max(0, previousStock + numDelta);
+
+      const updatedVars = product.variants.map(v => v.id === item.variantId ? { ...v, stock: newStock } : { ...v });
+      const newTotal = updatedVars.reduce((acc, v) => acc + (Number(v.stock) || 0), 0);
+
+      const updatedProd: Product = {
+        ...product,
+        variants: updatedVars,
+        totalStock: newTotal,
+        updatedAt: timestamp,
+        lastUpdatedBy: {
           deviceId: currentDevice.deviceId,
           deviceName: currentDevice.deviceName,
           operatorName: currentDevice.operatorName,
-        }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (Array.isArray(data.affectedProducts)) {
-          setProducts(prev => {
-            const map = new Map(prev.map(p => [p.id, p]));
-            for (const p of data.affectedProducts) {
-              map.set(p.id, p);
-            }
-            return Array.from(map.values());
-          });
-          batchSyncProductsToFirestore(data.affectedProducts, data.logs).catch((err) => console.warn('[Firestore] Batch sync notice:', err));
-        }
-        if (Array.isArray(data.logs)) {
-          setStockLogs(prev => [...data.logs, ...prev]);
-        }
-        return true;
+        },
+      };
+
+      const log: StockLog = {
+        id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        timestamp,
+        productId: product.id,
+        productName: product.name,
+        variantId: variant.id,
+        variantDescription: `${variant.size} • Warna: ${variant.color}`,
+        changeType: item.changeType || 'adjustment',
+        delta: numDelta,
+        previousStock,
+        newStock,
+        reason: item.reason || '',
+        deviceId: currentDevice.deviceId,
+        deviceName: currentDevice.deviceName,
+        operatorName: currentDevice.operatorName,
+      };
+
+      createdLogs.unshift(log);
+      const existingIdx = affectedProducts.findIndex(p => p.id === updatedProd.id);
+      if (existingIdx >= 0) {
+        affectedProducts[existingIdx] = updatedProd;
+      } else {
+        affectedProducts.push(updatedProd);
       }
-      return false;
-    } catch (err) {
-      console.error('Error batch adjusting stock:', err);
-      return false;
     }
+
+    if (affectedProducts.length > 0) {
+      setProducts(prev => {
+        const map = new Map(prev.map(p => [p.id, p]));
+        for (const p of affectedProducts) {
+          map.set(p.id, p);
+        }
+        const next = Array.from(map.values());
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('stz_saved_products', JSON.stringify(next));
+            localStorage.removeItem('stz_explicitly_empty');
+          } catch (e) {}
+        }
+        return next;
+      });
+
+      setStockLogs(prev => {
+        const next = [...createdLogs, ...prev].slice(0, 100);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('stz_saved_logs', JSON.stringify(next));
+          } catch (e) {}
+        }
+        return next;
+      });
+
+      batchSyncProductsToFirestore(affectedProducts, createdLogs).catch(() => {});
+    }
+
+    // 2. Send to Server with queue fallback
+    const payload = {
+      items,
+      deviceId: currentDevice.deviceId,
+      deviceName: currentDevice.deviceName,
+      operatorName: currentDevice.operatorName,
+    };
+
+    try {
+      const response = await fetchWithTimeout('/api/stock/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }, 6000);
+
+      if (!response || !response.ok) {
+        enqueuePendingMutation({
+          id: `mut-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          type: 'batch',
+          endpoint: '/api/stock/batch',
+          payload,
+          timestamp,
+        });
+      }
+    } catch {
+      enqueuePendingMutation({
+        id: `mut-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        type: 'batch',
+        endpoint: '/api/stock/batch',
+        payload,
+        timestamp,
+      });
+    }
+
+    return true;
   };
 
   const createProduct = async (productData: Partial<Product>): Promise<boolean> => {
+    const timestamp = new Date().toISOString();
+    const id = productData.id || `prod-${Date.now()}`;
+    const variants = (productData.variants || []).map((v: any, index: number) => ({
+      id: v.id || `var-${id}-${index + 1}`,
+      sku: typeof v.sku === 'string' ? v.sku.trim() : '',
+      size: v.size || 'All Size',
+      color: v.color || 'Standar',
+      colorHex: v.colorHex || '#CBD5E1',
+      stock: Number(v.stock) || 0,
+      minStock: Number(v.minStock) || 2,
+      price: Number(v.price) || 0,
+      costPrice: Number(v.costPrice) || 0,
+      barcode: v.barcode || '',
+    }));
+    const totalStock = variants.reduce((sum: number, v: any) => sum + (Number(v.stock) || 0), 0);
+
+    const newProduct: Product = {
+      id,
+      sku: typeof productData.sku === 'string' ? productData.sku.trim() : '',
+      name: productData.name || 'Produk Baru',
+      category: productData.category || 'Umum',
+      description: (productData.description && !/di+mport\s+dari\s+file\s+rekap\s+stok\s+csv/i.test(productData.description)) ? productData.description.trim() : '',
+      imageUrl: productData.imageUrl || '/assets/aistudio/WhatsApp_Image_2026-10-20_at_14.00.08_44e1b065.jpeg',
+      location: productData.location || 'Gudang Utama',
+      variants,
+      totalStock,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      lastUpdatedBy: {
+        deviceId: currentDevice.deviceId,
+        deviceName: currentDevice.deviceName,
+        operatorName: currentDevice.operatorName,
+      },
+    };
+
+    const log: StockLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      timestamp,
+      productId: newProduct.id,
+      productName: newProduct.name,
+      variantId: 'all',
+      variantDescription: `${newProduct.variants.length} varian`,
+      changeType: 'restock',
+      delta: totalStock,
+      previousStock: 0,
+      newStock: totalStock,
+      reason: 'Penambahan Produk Baru ke Katalog',
+      deviceId: currentDevice.deviceId,
+      deviceName: currentDevice.deviceName,
+      operatorName: currentDevice.operatorName,
+    };
+
+    // 1. Optimistic state & storage updates
+    setProducts(prev => {
+      const next = [newProduct, ...prev.filter(p => p.id !== newProduct.id)];
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('stz_saved_products', JSON.stringify(next));
+          localStorage.removeItem('stz_explicitly_empty');
+        } catch (e) {}
+      }
+      return next;
+    });
+
+    setStockLogs(prev => {
+      const next = [log, ...prev].slice(0, 100);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('stz_saved_logs', JSON.stringify(next));
+        } catch (e) {}
+      }
+      return next;
+    });
+
+    // 2. BroadcastChannel & Firestore sync
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const bc = new BroadcastChannel('stz_inventory_channel');
+        bc.postMessage({
+          type: 'PRODUCT_CREATED',
+          payload: { product: newProduct, log },
+          meta: {
+            deviceId: currentDevice.deviceId,
+            deviceName: currentDevice.deviceName,
+            operatorName: currentDevice.operatorName,
+            timestamp,
+          },
+        });
+        bc.close();
+      } catch (e) {}
+    }
+    syncProductToFirestore(newProduct).catch(() => {});
+    saveLogToFirestore(log).catch(() => {});
+
+    // 3. Send to Server with queue fallback
+    const payload = {
+      ...newProduct,
+      deviceId: currentDevice.deviceId,
+      deviceName: currentDevice.deviceName,
+      operatorName: currentDevice.operatorName,
+    };
+
     try {
-      const response = await fetch('/api/products', {
+      const response = await fetchWithTimeout('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...productData,
-          deviceId: currentDevice.deviceId,
-          deviceName: currentDevice.deviceName,
-          operatorName: currentDevice.operatorName,
-        }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.product) {
-          const clonedProduct: Product = {
-            ...data.product,
-            variants: Array.isArray(data.product.variants) ? data.product.variants.map((v: any) => ({ ...v })) : [],
-          };
-          setProducts(prev => {
-            const next = [clonedProduct, ...prev.filter(p => p.id !== clonedProduct.id)];
-            if (typeof window !== 'undefined') {
-              try {
-                localStorage.setItem('stz_saved_products', JSON.stringify(next));
-              } catch (e) {}
-            }
-            return next;
-          });
+        body: JSON.stringify(payload),
+      }, 6000);
 
-          if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-            try {
-              const bc = new BroadcastChannel('stz_inventory_channel');
-              bc.postMessage({
-                type: 'PRODUCT_CREATED',
-                payload: { product: clonedProduct, log: data.log },
-                meta: {
-                  deviceId: currentDevice.deviceId,
-                  deviceName: currentDevice.deviceName,
-                  operatorName: currentDevice.operatorName,
-                  timestamp: new Date().toISOString(),
-                },
-              });
-              bc.close();
-            } catch (e) {}
-          }
-          syncProductToFirestore(clonedProduct);
-        }
-        if (data.log) {
-          setStockLogs(prev => [data.log, ...prev]);
-          saveLogToFirestore(data.log);
-        }
-        return true;
+      if (!response || !response.ok) {
+        enqueuePendingMutation({
+          id: `mut-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          type: 'create',
+          endpoint: '/api/products',
+          payload,
+          timestamp,
+        });
       }
-      return false;
-    } catch (err) {
-      console.error('Error creating product:', err);
-      return false;
+    } catch {
+      enqueuePendingMutation({
+        id: `mut-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        type: 'create',
+        endpoint: '/api/products',
+        payload,
+        timestamp,
+      });
     }
+
+    return true;
   };
 
   const batchImportProducts = async (
@@ -1502,7 +1862,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     importMode: 'update' | 'add' | 'replace' = 'update'
   ): Promise<{ success: boolean; count: number; totalUnits: number; updatedCount?: number; addedCount?: number; error?: string }> => {
     try {
-      const response = await fetch('/api/products/batch-import', {
+      const response = await fetchWithTimeout('/api/products/batch-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1514,10 +1874,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           deviceName: currentDevice.deviceName,
           operatorName: currentDevice.operatorName,
         }),
-      });
+      }, 15000);
 
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => ({}));
+      if (!response || !response.ok) {
+        const errJson = response ? await response.json().catch(() => ({})) : {};
         throw new Error(errJson.error || 'Gagal memproses impor berkas di server');
       }
 
@@ -1527,11 +1887,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (typeof window !== 'undefined') {
           try {
             localStorage.setItem('stz_saved_products', JSON.stringify(data.products));
+            localStorage.removeItem('stz_explicitly_empty');
           } catch (e) {}
         }
       }
       if (data.log) {
-        setStockLogs(prev => [data.log, ...prev]);
+        setStockLogs(prev => [data.log, ...prev].slice(0, 100));
         saveLogToFirestore(data.log).catch(() => {});
       }
       if (Array.isArray(data.products)) {
@@ -1584,111 +1945,204 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const updateProduct = async (id: string, productData: Partial<Product>): Promise<boolean> => {
-    try {
-      const response = await fetch(`/api/products/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...productData,
+    const timestamp = new Date().toISOString();
+    const existingProduct = products.find(p => p.id === id);
+
+    let clonedProduct: Product | null = null;
+    let log: StockLog | null = null;
+
+    if (existingProduct) {
+      const updatedVariants = Array.isArray(productData.variants) ? productData.variants.map((v: any, index: number) => ({
+        id: v.id || `var-${id}-${index + 1}`,
+        sku: v.sku !== undefined ? (typeof v.sku === 'string' ? v.sku.trim() : '') : (existingProduct.sku || ''),
+        size: v.size || 'All Size',
+        color: v.color || 'Standar',
+        colorHex: v.colorHex || '#CBD5E1',
+        stock: Math.max(0, Number(v.stock) || 0),
+        minStock: Math.max(0, Number(v.minStock) || 2),
+        price: Number(v.price) || 0,
+        costPrice: Number(v.costPrice) || 0,
+        barcode: v.barcode || '',
+      })) : existingProduct.variants;
+
+      const totalStock = updatedVariants.reduce((sum: number, v: any) => sum + v.stock, 0);
+
+      clonedProduct = {
+        ...existingProduct,
+        ...productData,
+        variants: updatedVariants,
+        totalStock,
+        updatedAt: timestamp,
+        lastUpdatedBy: {
           deviceId: currentDevice.deviceId,
           deviceName: currentDevice.deviceName,
           operatorName: currentDevice.operatorName,
-        }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.product) {
-          const clonedProduct: Product = {
-            ...data.product,
-            variants: Array.isArray(data.product.variants) ? data.product.variants.map((v: any) => ({ ...v })) : [],
-          };
-          setProducts(prev => {
-            const next = prev.map(p => (p.id === clonedProduct.id ? clonedProduct : p));
-            if (typeof window !== 'undefined') {
-              try {
-                localStorage.setItem('stz_saved_products', JSON.stringify(next));
-              } catch (e) {}
-            }
-            return next;
-          });
+        },
+      };
 
-          if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-            try {
-              const bc = new BroadcastChannel('stz_inventory_channel');
-              bc.postMessage({
-                type: 'PRODUCT_UPDATED',
-                payload: { product: clonedProduct, log: data.log },
-                meta: {
-                  deviceId: currentDevice.deviceId,
-                  deviceName: currentDevice.deviceName,
-                  operatorName: currentDevice.operatorName,
-                  timestamp: new Date().toISOString(),
-                },
-              });
-              bc.close();
-            } catch (e) {}
-          }
-          syncProductToFirestore(clonedProduct);
-        }
-        if (data.log) {
-          setStockLogs(prev => [data.log, ...prev.filter(l => l.id !== data.log.id)].slice(0, 100));
-          saveLogToFirestore(data.log);
-        }
-        return true;
-      }
-      return false;
-    } catch (err) {
-      console.error('Error updating product:', err);
-      return false;
-    }
-  };
-
-  const deleteProduct = async (id: string): Promise<boolean> => {
-    try {
-      const params = new URLSearchParams({
+      const stockDiff = totalStock - existingProduct.totalStock;
+      log = {
+        id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        timestamp,
+        productId: id,
+        productName: clonedProduct.name,
+        variantId: clonedProduct.variants[0]?.id || '',
+        variantDescription: `Pembaruan data produk (${clonedProduct.category})`,
+        changeType: 'adjustment',
+        delta: stockDiff,
+        previousStock: existingProduct.totalStock,
+        newStock: totalStock,
+        reason: `Perubahan data produk oleh ${currentDevice.operatorName} (${currentDevice.deviceName})`,
         deviceId: currentDevice.deviceId,
         deviceName: currentDevice.deviceName,
         operatorName: currentDevice.operatorName,
-      });
-      const response = await fetch(`/api/products/${id}?${params.toString()}`, {
-        method: 'DELETE',
-      });
-      deleteProductFromFirestore(id);
-      if (response.ok) {
-        const data = await response.json().catch(() => ({}));
-        setProducts(prev => {
-          const next = prev.filter(p => p.id !== id);
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.setItem('stz_saved_products', JSON.stringify(next));
-            } catch (e) {}
-          }
-          return next;
-        });
+      };
 
-        if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      // Optimistic update
+      setProducts(prev => {
+        const next = prev.map(p => (p.id === clonedProduct!.id ? clonedProduct! : p));
+        if (typeof window !== 'undefined') {
           try {
-            const bc = new BroadcastChannel('stz_inventory_channel');
-            bc.postMessage({
-              type: 'PRODUCT_DELETED',
-              payload: { productId: id, productName: data.productName || 'Produk' },
-              meta: {
-                deviceId: currentDevice.deviceId,
-                deviceName: currentDevice.deviceName,
-                operatorName: currentDevice.operatorName,
-                timestamp: new Date().toISOString(),
-              },
-            });
-            bc.close();
+            localStorage.setItem('stz_saved_products', JSON.stringify(next));
           } catch (e) {}
         }
-        return true;
+        return next;
+      });
+
+      setStockLogs(prev => {
+        const next = [log!, ...prev.filter(l => l.id !== log!.id)].slice(0, 100);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('stz_saved_logs', JSON.stringify(next));
+          } catch (e) {}
+        }
+        return next;
+      });
+
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        try {
+          const bc = new BroadcastChannel('stz_inventory_channel');
+          bc.postMessage({
+            type: 'PRODUCT_UPDATED',
+            payload: { product: clonedProduct, log },
+            meta: {
+              deviceId: currentDevice.deviceId,
+              deviceName: currentDevice.deviceName,
+              operatorName: currentDevice.operatorName,
+              timestamp,
+            },
+          });
+          bc.close();
+        } catch (e) {}
       }
-      return false;
-    } catch (err) {
-      console.error('Error deleting product:', err);
-      return false;
+
+      syncProductToFirestore(clonedProduct).catch(() => {});
+      saveLogToFirestore(log).catch(() => {});
     }
+
+    const payload = {
+      ...productData,
+      deviceId: currentDevice.deviceId,
+      deviceName: currentDevice.deviceName,
+      operatorName: currentDevice.operatorName,
+    };
+
+    try {
+      const response = await fetchWithTimeout(`/api/products/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }, 6000);
+
+      if (!response || !response.ok) {
+        enqueuePendingMutation({
+          id: `mut-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          type: 'update',
+          endpoint: `/api/products/${id}`,
+          payload,
+          timestamp,
+        });
+      }
+    } catch {
+      enqueuePendingMutation({
+        id: `mut-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        type: 'update',
+        endpoint: `/api/products/${id}`,
+        payload,
+        timestamp,
+      });
+    }
+
+    return true;
+  };
+
+  const deleteProduct = async (id: string): Promise<boolean> => {
+    const existing = products.find(p => p.id === id);
+    const productName = existing ? existing.name : 'Produk';
+    const timestamp = new Date().toISOString();
+
+    // 1. Optimistic local removal
+    setProducts(prev => {
+      const next = prev.filter(p => p.id !== id);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('stz_saved_products', JSON.stringify(next));
+        } catch (e) {}
+      }
+      return next;
+    });
+
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const bc = new BroadcastChannel('stz_inventory_channel');
+        bc.postMessage({
+          type: 'PRODUCT_DELETED',
+          payload: { productId: id, productName },
+          meta: {
+            deviceId: currentDevice.deviceId,
+            deviceName: currentDevice.deviceName,
+            operatorName: currentDevice.operatorName,
+            timestamp,
+          },
+        });
+        bc.close();
+      } catch (e) {}
+    }
+
+    deleteProductFromFirestore(id).catch(() => {});
+
+    // 2. Server DELETE with queue fallback
+    const params = new URLSearchParams({
+      deviceId: currentDevice.deviceId,
+      deviceName: currentDevice.deviceName,
+      operatorName: currentDevice.operatorName,
+    });
+
+    try {
+      const response = await fetchWithTimeout(`/api/products/${id}?${params.toString()}`, {
+        method: 'DELETE',
+      }, 5000);
+
+      if (!response || !response.ok) {
+        enqueuePendingMutation({
+          id: `mut-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          type: 'delete',
+          endpoint: `/api/products/${id}?${params.toString()}`,
+          payload: {},
+          timestamp,
+        });
+      }
+    } catch {
+      enqueuePendingMutation({
+        id: `mut-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        type: 'delete',
+        endpoint: `/api/products/${id}?${params.toString()}`,
+        payload: {},
+        timestamp,
+      });
+    }
+
+    return true;
   };
 
   const resetDemoData = async () => {
