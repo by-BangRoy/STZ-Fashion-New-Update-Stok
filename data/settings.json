@@ -6,11 +6,11 @@
   "defaultMinStockAlert": 3,
   "enableStockNotifications": true,
   "profile": {
-    "storeName": "STZ Stok",
-    "storeBranch": "",
     "tagline": "Rekap Barang Keluar / Masuk",
     "phone": "",
     "address": "",
+    "storeBranch": "",
+    "storeName": "STZ",
     "ownerName": "",
     "socialMedia": ""
   }

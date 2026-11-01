@@ -103,9 +103,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   }, [variantsList, filterStatus, defaultMin]);
 
   return (
-    <div className="bg-white rounded-2xl border border-yellow-200/90 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden flex flex-col group">
+    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-yellow-200/90 dark:border-slate-800 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden flex flex-col group">
       {/* Product Image & Top Badges */}
-      <div className="relative aspect-[4/3] bg-yellow-50 overflow-hidden">
+      <div className="relative aspect-[4/3] bg-yellow-50 dark:bg-slate-800 overflow-hidden">
         <img
           src={product.imageUrl || '/assets/aistudio/WhatsApp_Image_2026-10-20_at_14.00.08_44e1b065.jpeg'}
           alt={product.name}
@@ -136,7 +136,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         {/* Edit Button */}
         <button
           onClick={() => onOpenEdit(product)}
-          className="absolute top-2 right-2 w-7 h-7 rounded-lg bg-white/95 hover:bg-white text-slate-700 flex items-center justify-center shadow-md transition-all active:scale-95"
+          className="absolute top-2 right-2 w-7 h-7 rounded-lg bg-white/95 dark:bg-slate-800/95 hover:bg-white dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center shadow-md transition-all active:scale-95"
           title="Edit Barang"
         >
           <Edit3 className="w-3.5 h-3.5" />
@@ -182,7 +182,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       <div className="p-3 sm:p-4 flex-1 flex flex-col justify-between">
         <div>
           <div className="flex items-start justify-between gap-1.5 mb-2">
-            <h3 className="font-bold text-slate-900 text-sm leading-snug line-clamp-2">
+            <h3 className="font-bold text-slate-900 dark:text-white text-sm leading-snug line-clamp-2">
               {product.name}
             </h3>
           </div>

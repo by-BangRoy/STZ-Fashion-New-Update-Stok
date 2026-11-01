@@ -99,11 +99,26 @@ export interface StoreProfile {
   socialMedia: string;
 }
 
+export type NotificationSoundType = 
+  | 'cash'       // Kasir Modern (Ka-Ching Kasir)
+  | 'chime'      // Chime Elegan (Dua Nada Lembut)
+  | 'bell'       // Denting Halus (Lonceng Kaca Butik)
+  | 'digital'    // Bip Digital (Scanner POS Modern)
+  | 'pop'        // Pop Ceria (Bubble Bounce)
+  | 'fanfare'    // Melodi Sukses (Nada Kemenangan 4 Akord)
+  | 'classic'    // Lonceng Butik Klasik (Lonceng Pintu)
+  | 'warning';   // Peringatan Halus (Alarm Stok Menipis)
+
 export interface AppSettings {
   securityPin: string; // PIN string (default "000000")
   pinRequired: boolean;
   autoLockMinutes: number; // 0 for disabled
   soundEnabled: boolean;
+  soundVolume?: number; // 0 - 100, default 80
+  notificationSound?: NotificationSoundType; // default 'cash'
+  restockSound?: NotificationSoundType; // default 'fanfare'
+  warningSound?: NotificationSoundType; // default 'warning'
+  playOnLocalAction?: boolean; // default true
   defaultMinStockAlert: number;
   enableStockNotifications: boolean;
   profile: StoreProfile;
@@ -114,6 +129,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   pinRequired: false,
   autoLockMinutes: 0,
   soundEnabled: true,
+  soundVolume: 80,
+  notificationSound: 'cash',
+  restockSound: 'fanfare',
+  warningSound: 'warning',
+  playOnLocalAction: true,
   defaultMinStockAlert: 3,
   enableStockNotifications: true,
   profile: {

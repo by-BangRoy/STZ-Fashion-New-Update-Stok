@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { useInventory } from '../context/InventoryContext.tsx';
 import { parseUniversalFile, parseDelimitedText, parseJsonInventory } from '../utils/fileImport.ts';
+import { playChime } from '../utils/audio.ts';
 import type { Product } from '../types/inventory.ts';
 import { 
   X, 
@@ -127,6 +128,7 @@ export const UniversalImportModal: React.FC<UniversalImportModalProps> = ({ isOp
       );
 
       if (res.success) {
+        playChime('restock');
         setSuccessInfo({
           count: res.count,
           totalUnits: res.totalUnits,

@@ -63,17 +63,17 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
         className={`p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer ${
           activeFilter === 'all'
             ? 'bg-gradient-to-br from-slate-900 to-slate-800 text-white border-yellow-500/40 shadow-md ring-2 ring-amber-400/50'
-            : 'bg-white hover:border-yellow-300 text-slate-800 border-yellow-200/90 shadow-xs'
+            : 'bg-white dark:bg-slate-900 hover:border-yellow-300 dark:hover:border-slate-700 text-slate-800 dark:text-slate-100 border-yellow-200/90 dark:border-slate-800 shadow-xs'
         }`}
       >
         <div className="flex items-center justify-between mb-1.5 sm:mb-2">
           <span className={`text-[11px] sm:text-xs font-bold uppercase tracking-wider ${
-            activeFilter === 'all' ? 'text-amber-300' : 'text-slate-500'
+            activeFilter === 'all' ? 'text-amber-300' : 'text-slate-500 dark:text-slate-400'
           }`}>
             Total Stok
           </span>
           <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center ${
-            activeFilter === 'all' ? 'bg-amber-400/20 text-amber-300' : 'bg-yellow-50 text-amber-700'
+            activeFilter === 'all' ? 'bg-amber-400/20 text-amber-300' : 'bg-yellow-50 dark:bg-slate-800 text-amber-700 dark:text-amber-400'
           }`}>
             <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </div>
@@ -82,7 +82,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
           {totalUnits.toLocaleString('id-ID')}
           <span className="text-xs font-normal ml-1 opacity-70">pcs</span>
         </div>
-        <div className={`text-[10px] sm:text-[11px] mt-0.5 sm:mt-1 font-bold ${activeFilter === 'all' ? 'text-amber-300' : 'text-amber-800'}`}>
+        <div className={`text-[10px] sm:text-[11px] mt-0.5 sm:mt-1 font-bold ${activeFilter === 'all' ? 'text-amber-300' : 'text-amber-800 dark:text-amber-400'}`}>
           ≈ {(totalUnits / 12).toLocaleString('id-ID', { maximumFractionDigits: 1 })} lusin
         </div>
       </div>
@@ -90,21 +90,21 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       {/* 2. Total Model Busana */}
       <div 
         onClick={onResetFilter}
-        className="p-3.5 sm:p-4 rounded-2xl bg-white border border-yellow-200/90 shadow-sm cursor-pointer hover:border-yellow-300 transition-all"
+        className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-slate-900 border border-yellow-200/90 dark:border-slate-800 shadow-sm cursor-pointer hover:border-yellow-300 dark:hover:border-slate-700 transition-all text-slate-800 dark:text-slate-100"
       >
         <div className="flex items-center justify-between mb-1.5 sm:mb-2">
-          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-500">
+          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Model Barang
           </span>
-          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center">
+          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-50 dark:bg-slate-800 text-amber-700 dark:text-amber-400 flex items-center justify-center">
             <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </div>
         </div>
-        <div className="text-xl sm:text-3xl font-black text-slate-900">
+        <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white">
           {totalModels}
-          <span className="text-xs font-normal ml-1 text-slate-500">model</span>
+          <span className="text-xs font-normal ml-1 text-slate-500 dark:text-slate-400">model</span>
         </div>
-        <div className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 sm:mt-1">
+        <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 sm:mt-1">
           Kategori aktif
         </div>
       </div>
@@ -115,28 +115,28 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
         className={`p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer ${
           activeFilter === 'low'
             ? 'bg-amber-500 text-slate-950 font-bold border-amber-600 shadow-md ring-2 ring-amber-300'
-            : 'bg-white hover:border-amber-300 text-slate-800 border-yellow-200/90 shadow-xs'
+            : 'bg-white dark:bg-slate-900 hover:border-amber-300 dark:hover:border-slate-700 text-slate-800 dark:text-slate-100 border-yellow-200/90 dark:border-slate-800 shadow-xs'
         }`}
       >
         <div className="flex items-center justify-between mb-1 sm:mb-2">
           <span className={`text-[11px] sm:text-xs font-bold uppercase tracking-wider ${
-            activeFilter === 'low' ? 'text-slate-950' : 'text-amber-800'
+            activeFilter === 'low' ? 'text-slate-950' : 'text-amber-800 dark:text-amber-400'
           }`}>
             Menipis
           </span>
           <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center ${
-            activeFilter === 'low' ? 'bg-black/10 text-slate-950' : 'bg-amber-50 text-amber-600'
+            activeFilter === 'low' ? 'bg-black/10 text-slate-950' : 'bg-amber-50 dark:bg-slate-800 text-amber-600 dark:text-amber-400'
           }`}>
             <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </div>
         </div>
         <div className={`text-xl sm:text-3xl font-black ${
-          activeFilter === 'low' ? 'text-slate-950' : lowStockProducts > 0 ? 'text-amber-600' : 'text-slate-800'
+          activeFilter === 'low' ? 'text-slate-950' : lowStockProducts > 0 ? 'text-amber-600' : 'text-slate-800 dark:text-slate-200'
         }`}>
           {lowStockProducts}
           <span className="text-xs font-normal ml-1 opacity-80">model</span>
         </div>
-        <div className={`text-[10px] sm:text-[11px] mt-0.5 sm:mt-1 truncate ${activeFilter === 'low' ? 'text-slate-900 font-semibold' : lowStockProducts > 0 ? 'text-amber-700 font-bold' : 'text-slate-400'}`}>
+        <div className={`text-[10px] sm:text-[11px] mt-0.5 sm:mt-1 truncate ${activeFilter === 'low' ? 'text-slate-900 font-semibold' : lowStockProducts > 0 ? 'text-amber-700 font-bold' : 'text-slate-400 dark:text-slate-500'}`}>
           {lowStockProducts > 0 ? 'Stok ≤ batas min' : 'Stok aman'}
         </div>
       </div>
@@ -147,28 +147,28 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
         className={`p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer ${
           activeFilter === 'out'
             ? 'bg-rose-600 text-white border-rose-700 shadow-md ring-2 ring-rose-400'
-            : 'bg-white hover:border-rose-300 text-slate-800 border-yellow-200/90 shadow-xs'
+            : 'bg-white dark:bg-slate-900 hover:border-rose-300 dark:hover:border-slate-700 text-slate-800 dark:text-slate-100 border-yellow-200/90 dark:border-slate-800 shadow-xs'
         }`}
       >
         <div className="flex items-center justify-between mb-1 sm:mb-2">
           <span className={`text-[11px] sm:text-xs font-bold uppercase tracking-wider ${
-            activeFilter === 'out' ? 'text-white' : 'text-rose-700'
+            activeFilter === 'out' ? 'text-white' : 'text-rose-700 dark:text-rose-400'
           }`}>
             Habis (0)
           </span>
           <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center ${
-            activeFilter === 'out' ? 'bg-white/20 text-white' : 'bg-rose-50 text-rose-600'
+            activeFilter === 'out' ? 'bg-white/20 text-white' : 'bg-rose-50 dark:bg-slate-800 text-rose-600 dark:text-rose-400'
           }`}>
             <AlertOctagon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </div>
         </div>
         <div className={`text-xl sm:text-3xl font-black ${
-          activeFilter === 'out' ? 'text-white' : outOfStockProducts > 0 ? 'text-rose-600' : 'text-slate-800'
+          activeFilter === 'out' ? 'text-white' : outOfStockProducts > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-800 dark:text-slate-200'
         }`}>
           {outOfStockProducts}
           <span className="text-xs font-normal ml-1 opacity-80">model</span>
         </div>
-        <div className={`text-[10px] sm:text-[11px] mt-0.5 sm:mt-1 truncate ${activeFilter === 'out' ? 'text-rose-100 font-bold' : outOfStockProducts > 0 ? 'text-rose-600 font-bold' : 'text-slate-400'}`}>
+        <div className={`text-[10px] sm:text-[11px] mt-0.5 sm:mt-1 truncate ${activeFilter === 'out' ? 'text-rose-100 font-bold' : outOfStockProducts > 0 ? 'text-rose-600 font-bold' : 'text-slate-400 dark:text-slate-500'}`}>
           {outOfStockProducts > 0 
             ? totallyOutOfStockProducts > 0 
               ? `${totallyOutOfStockProducts} total • ${outOfStockProducts - totallyOutOfStockProducts} varian` 
@@ -178,20 +178,20 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       </div>
 
       {/* 5. Aktivitas Real-Time Hari Ini */}
-      <div className="p-3 sm:p-4 rounded-2xl bg-white border border-yellow-200/90 shadow-xs col-span-2 lg:col-span-1">
+      <div className="p-3 sm:p-4 rounded-2xl bg-white dark:bg-slate-900 border border-yellow-200/90 dark:border-slate-800 shadow-xs col-span-2 lg:col-span-1 text-slate-800 dark:text-slate-100">
         <div className="flex items-center justify-between mb-1 sm:mb-2">
-          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-500">
+          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Aktivitas Hari Ini
           </span>
-          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-yellow-50 text-amber-700 flex items-center justify-center">
+          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-yellow-50 dark:bg-slate-800 text-amber-700 dark:text-amber-400 flex items-center justify-center">
             <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </div>
         </div>
-        <div className="text-xl sm:text-3xl font-black text-slate-900">
+        <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white">
           {todayLogsCount}
-          <span className="text-xs font-normal ml-1 text-slate-500">log</span>
+          <span className="text-xs font-normal ml-1 text-slate-500 dark:text-slate-400">log</span>
         </div>
-        <div className="text-[10px] sm:text-[11px] text-amber-800 font-semibold mt-0.5 sm:mt-1 flex items-center gap-1">
+        <div className="text-[10px] sm:text-[11px] text-amber-800 dark:text-amber-400 font-semibold mt-0.5 sm:mt-1 flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
           <span>Real-time aktif</span>
         </div>

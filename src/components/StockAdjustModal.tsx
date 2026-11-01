@@ -68,7 +68,7 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
   onClose,
   onOpenFullEdit,
 }) => {
-  const { adjustStock, updateProduct, products } = useInventory();
+  const { adjustStock, updateProduct, products, addNotificationToast } = useInventory();
 
   // Find the reactive product from context so any updates immediately reflect
   const activeProduct = products.find((p) => p.id === product.id) || product;
@@ -220,7 +220,15 @@ export const StockAdjustModal: React.FC<StockAdjustModalProps> = ({
   const handleSaveProductInfo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editName.trim()) {
-      alert('Nama barang wajib diisi!');
+      addNotificationToast({
+        title: 'Nama Barang Kosong',
+        message: 'Nama barang wajib diisi sebelum menyimpan!',
+        type: 'warning',
+        deviceName: 'Sistem',
+        operatorName: 'Validasi',
+        isRemote: false,
+        productName: activeProduct.name || 'Barang',
+      });
       return;
     }
 

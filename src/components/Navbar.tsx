@@ -1,5 +1,6 @@
 import React from 'react';
 import { useInventory } from '../context/InventoryContext.tsx';
+import { useTheme } from '../context/ThemeContext.tsx';
 import { 
   Volume2, 
   VolumeX, 
@@ -10,7 +11,8 @@ import {
   Sliders, 
   Lock, 
   LayoutGrid,
-  RefreshCw 
+  RefreshCw,
+  Palette
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -18,7 +20,8 @@ interface NavbarProps {
   onOpenAuditLog: () => void;
   onOpenOpname: () => void;
   onOpenAddProduct: () => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: any) => void;
+  onOpenTheme?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -27,6 +30,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenOpname,
   onOpenAddProduct,
   onOpenSettings,
+  onOpenTheme,
 }) => {
   const { 
     connectedDevicesCount, 
@@ -40,6 +44,15 @@ export const Navbar: React.FC<NavbarProps> = ({
     refreshData,
     isRefreshing
   } = useInventory();
+
+  const {
+    openThemeModal,
+    palette,
+    effectiveMode,
+    themeMode,
+  } = useTheme();
+
+  const handleOpenTheme = onOpenTheme || openThemeModal;
 
   return (
     <>
@@ -135,6 +148,23 @@ export const Navbar: React.FC<NavbarProps> = ({
                 title={soundOn ? 'Suara Notifikasi Aktif' : 'Suara Notifikasi Senyap'}
               >
                 {soundOn ? <Volume2 className="w-4 h-4 text-amber-400" /> : <VolumeX className="w-4 h-4" />}
+              </button>
+
+              {/* Tombol Tema Perangkat (Warna & Mode HP) */}
+              <button
+                type="button"
+                onClick={handleOpenTheme}
+                className="flex items-center gap-1.5 p-1.5 sm:px-2.5 sm:py-2 rounded-xl bg-slate-800 hover:bg-slate-700/90 border border-slate-700 text-xs font-semibold text-slate-200 transition-all hover:border-amber-400/50 cursor-pointer shadow-xs active:scale-95"
+                title={`Tema Perangkat: ${palette.name} (${effectiveMode === 'dark' ? 'Mode Gelap' : 'Mode Terang'}${themeMode === 'auto' ? ' • Otomatis HP' : ''}) - Klik untuk ubah warna & mode`}
+              >
+                <div className="relative flex items-center justify-center">
+                  <Palette className="w-4 h-4 text-amber-400" />
+                  <span 
+                    className="absolute -top-1 -right-1 w-2 h-2 rounded-full border border-slate-900 shadow-2xs"
+                    style={{ backgroundColor: palette.primaryHex }}
+                  />
+                </div>
+                <span className="hidden xl:inline text-xs font-bold">Tema</span>
               </button>
 
               {/* Audit Log Button (Desktop) */}

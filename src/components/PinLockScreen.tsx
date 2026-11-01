@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useInventory } from '../context/InventoryContext.tsx';
+import { useTheme } from '../context/ThemeContext.tsx';
+import { ThemeModal } from './ThemeModal.tsx';
 import { 
   KeyRound, 
   Delete, 
@@ -8,11 +10,13 @@ import {
   Eye,
   EyeOff,
   ArrowRight,
-  Lock
+  Lock,
+  Palette
 } from 'lucide-react';
 
 export const PinLockScreen: React.FC = () => {
   const { unlockWithPin, settings } = useInventory();
+  const { palette, isThemeModalOpen, openThemeModal, closeThemeModal } = useTheme();
   const [pin, setPin] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isChecking, setIsChecking] = useState(false);

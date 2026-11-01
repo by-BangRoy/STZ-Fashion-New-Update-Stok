@@ -684,286 +684,155 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
 
           {/* TAB 2: SAMBUNGKAN HP LAIN */}
           {activeTab === 'connect' && (
-            <div className="space-y-4 animate-in fade-in duration-150">
-              {/* Main Hub Card */}
-              <div className="bg-gradient-to-br from-amber-500/10 via-yellow-500/5 to-white border border-amber-200/90 rounded-2xl p-4 sm:p-5 shadow-xs">
-                <div className="flex flex-col md:flex-row items-center md:items-start gap-6">
-                  {/* Kolom Kiri: QR Code Card (Generated locally via client-side SVG/Canvas data URL -> 0% 403 risk) */}
-                  <div className="w-full sm:w-auto flex flex-col items-center shrink-0">
-                    <div className="p-3.5 bg-white rounded-2xl shadow-md border-2 border-amber-300 ring-4 ring-amber-100/70 flex flex-col items-center">
-                      {isGeneratingQr ? (
-                        <div className="w-44 h-44 flex flex-col items-center justify-center bg-slate-50 rounded-xl gap-2 text-slate-500">
-                          <RefreshCw className="w-6 h-6 animate-spin text-amber-600" />
-                          <span className="text-[11px] font-bold">Membuat Barcode...</span>
-                        </div>
-                      ) : qrCodeDataUrl ? (
-                        <img 
-                          src={qrCodeDataUrl} 
-                          alt="Barcode QR Code Buka di HP" 
-                          className="w-44 h-44 object-contain rounded-xl"
-                        />
-                      ) : (
-                        <div className="w-44 h-44 flex items-center justify-center bg-slate-100 rounded-xl text-xs text-slate-500">
-                          Gagal memuat barcode
-                        </div>
-                      )}
-
-                      <div className="mt-2.5 flex items-center gap-2">
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-100 text-amber-950 text-[10px] font-black border border-amber-300">
-                          <Camera className="w-3.5 h-3.5 text-amber-700" />
-                          <span>Scan Kamera HP</span>
-                        </div>
-                        {qrCodeDataUrl && (
-                          <button
-                            type="button"
-                            onClick={handleDownloadQr}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-extrabold active:scale-95 transition-all cursor-pointer shadow-xs"
-                            title="Unduh gambar barcode QR (PNG)"
-                          >
-                            <Download className="w-3 h-3 text-amber-400" />
-                            <span>Simpan</span>
-                          </button>
-                        )}
+            <div className="space-y-4 animate-in fade-in duration-150 max-w-xl mx-auto">
+              {/* Main Card - Format 1 Kolom Rapi & Terpusat */}
+              <div className="bg-gradient-to-br from-amber-500/10 via-yellow-500/5 to-white border border-amber-200/90 rounded-3xl p-5 sm:p-7 shadow-xs flex flex-col items-center space-y-6">
+                
+                {/* 1. Barcode QR Code Area */}
+                <div className="flex flex-col items-center text-center">
+                  <div className="p-4 bg-white rounded-2xl shadow-md border-2 border-amber-300 ring-4 ring-amber-100/70 flex flex-col items-center">
+                    {isGeneratingQr ? (
+                      <div className="w-44 h-44 sm:w-48 sm:h-48 flex flex-col items-center justify-center bg-slate-50 rounded-xl gap-2 text-slate-500">
+                        <RefreshCw className="w-6 h-6 animate-spin text-amber-600" />
+                        <span className="text-[11px] font-bold">Membuat Barcode...</span>
                       </div>
+                    ) : qrCodeDataUrl ? (
+                      <img 
+                        src={qrCodeDataUrl} 
+                        alt="Barcode QR Code Buka di HP" 
+                        className="w-44 h-44 sm:w-48 sm:h-48 object-contain rounded-xl"
+                      />
+                    ) : (
+                      <div className="w-44 h-44 sm:w-48 sm:h-48 flex items-center justify-center bg-slate-100 rounded-xl text-xs text-slate-500">
+                        Gagal memuat barcode
+                      </div>
+                    )}
+
+                    <div className="mt-3 flex items-center gap-2">
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-950 text-[11px] font-black border border-amber-300">
+                        <Camera className="w-3.5 h-3.5 text-amber-700" />
+                        <span>Scan Kamera HP</span>
+                      </div>
+                      {qrCodeDataUrl && (
+                        <button
+                          type="button"
+                          onClick={handleDownloadQr}
+                          className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-extrabold active:scale-95 transition-all cursor-pointer shadow-xs"
+                          title="Unduh gambar barcode QR (PNG)"
+                        >
+                          <Download className="w-3 h-3 text-amber-400" />
+                          <span>Simpan QR</span>
+                        </button>
+                      )}
                     </div>
-                    <span className="text-[11px] text-slate-500 mt-2 text-center max-w-[220px] leading-tight">
-                      Arahkan kamera HP kasir ke barcode ini untuk langsung membuka katalog stok
+                  </div>
+                  <p className="text-xs text-slate-600 mt-2.5 max-w-sm leading-relaxed">
+                    Arahkan kamera HP kasir / staf ke barcode ini untuk langsung membuka aplikasi stok toko.
+                  </p>
+                </div>
+
+                {/* 2. Tautan Akses Toko - 1 Kolom Penuh Rapi */}
+                <div className="w-full space-y-2">
+                  <div className="flex items-center justify-between px-1">
+                    <label className="text-xs font-black text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
+                      <Link2 className="w-4 h-4 text-amber-700" />
+                      <span>Tautan Akses Toko:</span>
+                    </label>
+                    <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100/90 px-2.5 py-0.5 rounded-full border border-emerald-300">
+                      ✓ Siap Digunakan
                     </span>
                   </div>
 
-                  {/* Kolom Kanan: Detail Tautan & Tombol Aksi Rapi */}
-                  <div className="flex-1 w-full space-y-3.5">
-                    {/* Header Box / Kolom Informasi Rapi */}
-                    <div className="p-4 rounded-2xl bg-white border border-amber-200/90 shadow-2xs space-y-2.5">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400 text-slate-950 text-[11px] font-black uppercase tracking-wider shadow-2xs">
-                          <QrCode className="w-3.5 h-3.5" />
-                          <span>Koneksi Instan Multi-Perangkat</span>
-                        </div>
-                        <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100/90 px-2.5 py-0.5 rounded-full border border-emerald-300">
-                          ✓ Otomatis Tersambung
+                  <div 
+                    onClick={handleCopyLink}
+                    className="flex items-center justify-between bg-white border border-amber-300 hover:border-amber-500 rounded-2xl p-3 sm:p-3.5 shadow-xs cursor-pointer transition-all group"
+                    title="Klik untuk menyalin tautan toko"
+                  >
+                    <div className="flex items-center gap-3 overflow-hidden flex-1 min-w-0">
+                      <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0 border border-amber-300 text-amber-800">
+                        <Lock className="w-4 h-4" />
+                      </div>
+                      <div className="flex flex-col min-w-0 pr-2">
+                        {showUrl ? (
+                          <span className="text-xs sm:text-sm font-bold text-slate-900 truncate font-mono select-all">
+                            {activeUrl}
+                          </span>
+                        ) : (
+                          <span className="text-xs sm:text-sm font-black text-slate-700 tracking-widest select-none font-mono">
+                            ••••••••••••••••••••••••••••••••
+                          </span>
+                        )}
+                        <span className="text-[11px] text-slate-500 font-medium truncate mt-0.5">
+                          {showUrl ? 'Tautan langsung aplikasi toko' : 'Tautan terenkripsi (klik untuk salin)'}
                         </span>
                       </div>
-
-                      <h4 className="text-base sm:text-lg font-black text-slate-900 tracking-tight leading-snug">
-                        Hubungkan HP Kasir &amp; Smartphone Staf
-                      </h4>
-
-                      {/* Kotak Rapi Tulisan Penjelasan */}
-                      <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-200/80 text-xs text-slate-700 leading-relaxed font-medium flex items-start gap-2.5">
-                        <Smartphone className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                        <p className="flex-1 text-slate-700">
-                          Buka dan kelola rekap stok toko langsung dari browser smartphone atau tablet kasir tanpa perlu mengunduh aplikasi tambahan. Seluruh mutasi stok barang masuk dan keluar langsung terhubung seketika.
-                        </p>
-                      </div>
-
-                      {/* Fitur Unggulan Mini Chips */}
-                      <div className="flex flex-wrap gap-1.5 pt-0.5 text-[11px]">
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-yellow-50/80 border border-amber-200/80 text-slate-800 font-bold">
-                          <Smartphone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          <span>Android &amp; iPhone (Browser)</span>
-                        </div>
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-yellow-50/80 border border-amber-200/80 text-slate-800 font-bold">
-                          <ShieldCheck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                          <span>Terenkripsi &amp; Aman</span>
-                        </div>
-                      </div>
                     </div>
 
-                    {/* URL Card Display - Tautan Terstruktur & Rapi */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <label className="text-[11px] font-extrabold text-slate-700 flex items-center gap-1.5">
-                          <Link2 className="w-3.5 h-3.5 text-amber-700" />
-                          <span>Tautan Akses Toko:</span>
-                        </label>
-                        <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100/90 px-2 py-0.5 rounded-full border border-emerald-300">
-                          ✓ Siap Digunakan
-                        </span>
-                      </div>
-                      <div 
-                        onClick={handleCopyLink}
-                        className="flex items-center justify-between bg-white border border-amber-300/90 hover:border-amber-500 rounded-xl p-2.5 pl-3.5 shadow-xs cursor-pointer transition-all group"
-                        title="Klik untuk menyalin tautan toko"
-                      >
-                        <div className="flex items-center gap-2.5 overflow-hidden flex-1 min-w-0">
-                          <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center shrink-0 border border-amber-300 text-amber-800">
-                            <Lock className="w-4 h-4" />
-                          </div>
-                          <div className="flex flex-col min-w-0 pr-1">
-                            {showUrl ? (
-                              <span className="text-xs font-bold text-slate-800 truncate font-mono">
-                                {activeUrl}
-                              </span>
-                            ) : (
-                              <span className="text-xs sm:text-sm font-black text-slate-700 tracking-widest select-none font-mono">
-                                ••••••••••••••••••••••••••••
-                              </span>
-                            )}
-                            <span className="text-[10px] text-slate-500 font-medium truncate">
-                              {showUrl ? 'Tautan langsung publik' : 'Tautan terenkripsi toko Anda'}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowUrl(!showUrl);
-                            }}
-                            className="p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer"
-                            title={showUrl ? 'Sembunyikan URL' : 'Tampilkan URL'}
-                          >
-                            {showUrl ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCopyLink();
-                            }}
-                            className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-xs"
-                            title="Salin tautan ke clipboard"
-                          >
-                            {copied ? (
-                              <>
-                                <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[3]" />
-                                <span className="text-emerald-300">Tersalin!</span>
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="w-3.5 h-3.5 text-amber-400" />
-                                <span>Salin Link</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Tombol-Tombol Aksi Berbagi */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
-                      {/* Tombol WhatsApp */}
+                    <div className="flex items-center gap-2 shrink-0 ml-2">
                       <button
                         type="button"
-                        onClick={handleShareWhatsApp}
-                        className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all shadow-xs active:scale-95 cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowUrl(!showUrl);
+                        }}
+                        className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer"
+                        title={showUrl ? 'Sembunyikan URL' : 'Tampilkan URL'}
                       >
-                        <MessageSquare className="w-4 h-4" />
-                        <span>Kirim via WhatsApp</span>
+                        {showUrl ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
-
-                      {/* Tombol Buka Tab Baru */}
                       <button
                         type="button"
-                        onClick={handleOpenNewTab}
-                        className="w-full px-4 py-2.5 bg-white hover:bg-amber-50 active:bg-amber-100 text-slate-800 border border-yellow-300 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all shadow-xs active:scale-95 cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCopyLink();
+                        }}
+                        className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-xs"
+                        title="Salin tautan ke clipboard"
                       >
-                        <ExternalLink className="w-4 h-4 text-amber-600" />
-                        <span>Buka di Tab Baru</span>
+                        {copied ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[3]" />
+                            <span className="text-emerald-300">Tersalin!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Salin Link</span>
+                          </>
+                        )}
                       </button>
                     </div>
-
-                    {/* Status Alert Badge saat Tersalin */}
-                    {copied && (
-                      <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold flex items-center gap-2 animate-in fade-in">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>✓ Tautan berhasil disalin! Silakan kirimkan ke staf kasir Anda melalui chat WhatsApp.</span>
-                      </div>
-                    )}
                   </div>
                 </div>
-              </div>
 
-              {/* Panduan 3 Langkah Cepat & Terstruktur */}
-              <div className="space-y-2.5 pt-1">
-                <div className="text-xs font-black text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                  <span>3 Langkah Mudah Sambungkan HP Lain:</span>
+                {/* 3. Tombol-Tombol Aksi Berbagi */}
+                <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleShareWhatsApp}
+                    className="w-full px-4 py-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 transition-all shadow-xs active:scale-95 cursor-pointer"
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    <span>Kirim via WhatsApp</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleOpenNewTab}
+                    className="w-full px-4 py-3 bg-white hover:bg-amber-50 active:bg-amber-100 text-slate-800 border border-yellow-300 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 transition-all shadow-xs active:scale-95 cursor-pointer"
+                  >
+                    <ExternalLink className="w-4 h-4 text-amber-600" />
+                    <span>Buka di Tab Baru</span>
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {/* Langkah 1 */}
-                  <div className="p-4 bg-white rounded-2xl border border-yellow-200/90 shadow-2xs flex flex-col justify-between hover:border-amber-300 transition-colors">
-                    <div>
-                      <div className="w-7 h-7 rounded-xl bg-amber-400 text-slate-950 text-xs font-black flex items-center justify-center mb-2.5 shadow-2xs">
-                        1
-                      </div>
-                      <div className="text-xs font-extrabold text-slate-900">
-                        Scan QR / Buka Link
-                      </div>
-                      <p className="text-[11px] text-slate-600 mt-1.5 leading-relaxed">
-                        Arahkan kamera HP ke barcode di atas, atau klik link toko yang Anda bagikan melalui WhatsApp.
-                      </p>
-                    </div>
-                    <div className="mt-3 pt-2 border-t border-slate-100 text-[10px] text-amber-800 font-extrabold">
-                      ✓ Tanpa instal aplikasi
-                    </div>
+                {/* Status Alert Badge saat Tersalin */}
+                {copied && (
+                  <div className="w-full p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold flex items-center gap-2.5 animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>✓ Tautan berhasil disalin! Silakan kirimkan ke staf kasir Anda melalui chat WhatsApp.</span>
                   </div>
-
-                  {/* Langkah 2 */}
-                  <div className="p-4 bg-white rounded-2xl border border-yellow-200/90 shadow-2xs flex flex-col justify-between hover:border-amber-300 transition-colors">
-                    <div>
-                      <div className="w-7 h-7 rounded-xl bg-amber-400 text-slate-950 text-xs font-black flex items-center justify-center mb-2.5 shadow-2xs">
-                        2
-                      </div>
-                      <div className="text-xs font-extrabold text-slate-900">
-                        Beri Nama HP &amp; Kasir
-                      </div>
-                      <p className="text-[11px] text-slate-600 mt-1.5 leading-relaxed">
-                        Masukkan nama staf (misal: "Kasir 1" atau "Gudang") agar setiap aktivitas barang tercatat transparan.
-                      </p>
-                    </div>
-                    <div className="mt-3 pt-2 border-t border-slate-100 text-[10px] text-amber-800 font-extrabold">
-                      ✓ Transparan di riwayat
-                    </div>
-                  </div>
-
-                  {/* Langkah 3 */}
-                  <div className="p-4 bg-white rounded-2xl border border-yellow-200/90 shadow-2xs flex flex-col justify-between hover:border-amber-300 transition-colors">
-                    <div>
-                      <div className="w-7 h-7 rounded-xl bg-amber-400 text-slate-950 text-xs font-black flex items-center justify-center mb-2.5 shadow-2xs">
-                        3
-                      </div>
-                      <div className="text-xs font-extrabold text-slate-900">
-                        Otomatis Tersinkron
-                      </div>
-                      <p className="text-[11px] text-slate-600 mt-1.5 leading-relaxed">
-                        Saat ada stok keluar atau masuk di kasir, data di seluruh HP dan tablet terupdate seketika secara otomatis.
-                      </p>
-                    </div>
-                    <div className="mt-3 pt-2 border-t border-slate-100 text-[10px] text-emerald-700 font-extrabold">
-                      ✓ Real-time &amp; siaga otomatis
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Box Solusi & Bantuan Jika Link Belum Bisa Dibuka di HP Lain */}
-              <div className="p-4 rounded-2xl bg-amber-500/10 border-2 border-amber-300 text-slate-800 space-y-3">
-                <div className="flex items-center gap-2 text-xs font-black text-amber-950 uppercase tracking-wider">
-                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
-                  <span>Solusi Jika Link Tidak Bisa Dibuka di HP / Perangkat Lain:</span>
-                </div>
-
-                <div className="space-y-2 text-xs text-slate-700 leading-relaxed">
-                  <div className="p-2.5 rounded-xl bg-white/90 border border-amber-200">
-                    <strong className="text-slate-900 block font-bold mb-0.5">1. Aktifkan Akses Berbagi di AI Studio (Paling Utama):</strong>
-                    Di pojok kanan atas layar Google AI Studio tempat Anda membuat proyek ini, klik tombol <strong>"Share"</strong> (Bagikan) atau <strong>"Publish"</strong>, lalu ubah izin dari <em>"Restricted"</em> menjadi <strong>"Anyone with the link"</strong> (Siapa saja yang memiliki tautan). Jika masih restricted, server Google akan menolak perangkat lain (HTTP 403 Forbidden).
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-white/90 border border-amber-200">
-                    <strong className="text-slate-900 block font-bold mb-0.5">2. Jika Muncul Layar "Action required to load your app" / "Cookie Check":</strong>
-                    Pada browser HP (terutama Safari iPhone atau Chrome Android), sistem Google meminta izin cookie keamanan. Cukup klik tombol biru <strong>"Authenticate in new window"</strong> atau <strong>"Grant permission"</strong> sekali saja untuk mengizinkan aplikasi memuat.
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-white/90 border border-amber-200">
-                    <strong className="text-slate-900 block font-bold mb-0.5">3. Pasang Sebagai Aplikasi HP (PWA):</strong>
-                    Setelah terbuka di browser HP staf, ketuk menu browser (titik 3 di Chrome atau ikon Bagikan di Safari) lalu pilih <strong>"Tambahkan ke Layar Utama" (Add to Home Screen)</strong> agar aplikasi terbuka fullscreen seperti aplikasi resmi Android / iOS.
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           )}

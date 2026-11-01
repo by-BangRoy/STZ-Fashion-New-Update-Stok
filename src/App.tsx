@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { InventoryProvider, useInventory } from './context/InventoryContext.tsx';
+import { ThemeProvider, useTheme } from './context/ThemeContext.tsx';
 import { Product } from './types/inventory.ts';
 import { Navbar } from './components/Navbar.tsx';
 import { StatsCards } from './components/StatsCards.tsx';
@@ -10,7 +11,8 @@ import { ProductFormModal } from './components/ProductFormModal.tsx';
 import { DeviceManagerModal } from './components/DeviceManagerModal.tsx';
 import { AuditLogDrawer } from './components/AuditLogDrawer.tsx';
 import { StockOpnameModal } from './components/StockOpnameModal.tsx';
-import { SettingsModal } from './components/SettingsModal.tsx';
+import { SettingsModal, SettingsTab } from './components/SettingsModal.tsx';
+import { ThemeModal } from './components/ThemeModal.tsx';
 import { PinLockScreen } from './components/PinLockScreen.tsx';
 import { RealtimeNotificationToasts } from './components/RealtimeNotificationToasts.tsx';
 import { UniversalImportModal } from './components/UniversalImportModal.tsx';
@@ -33,7 +35,8 @@ import {
   Upload,
   RefreshCw,
   AlertTriangle,
-  AlertOctagon
+  AlertOctagon,
+  Palette
 } from 'lucide-react';
 
 function DashboardView() {
@@ -50,6 +53,36 @@ function DashboardView() {
     addNotificationToast,
     currentDevice
   } = useInventory();
+
+  const {
+    effectiveMode,
+    themeColor,
+    palette,
+    isThemeModalOpen,
+    openThemeModal,
+    closeThemeModal,
+  } = useTheme();
+
+  const bgClass = useMemo(() => {
+    if (effectiveMode === 'dark') {
+      return 'bg-slate-950 text-slate-100 selection:bg-amber-400 selection:text-slate-950';
+    }
+    switch (themeColor) {
+      case 'emerald':
+        return 'bg-[#F0FDF4] text-slate-800 selection:bg-emerald-400 selection:text-slate-950';
+      case 'blue':
+        return 'bg-[#EFF6FF] text-slate-800 selection:bg-blue-400 selection:text-slate-950';
+      case 'rose':
+        return 'bg-[#FFF1F2] text-slate-800 selection:bg-rose-400 selection:text-slate-950';
+      case 'purple':
+        return 'bg-[#FAF5FF] text-slate-800 selection:bg-purple-400 selection:text-slate-950';
+      case 'slate':
+        return 'bg-[#F8FAFC] text-slate-800 selection:bg-slate-400 selection:text-slate-950';
+      case 'amber':
+      default:
+        return 'bg-[#FEFCE8] text-slate-800 selection:bg-amber-400 selection:text-slate-950';
+    }
+  }, [effectiveMode, themeColor]);
 
   // Real-time stock warnings calculation
   const defaultMinStock = settings.defaultMinStockAlert || 3;
@@ -108,6 +141,7 @@ function DashboardView() {
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
   const [isOpnameModalOpen, setIsOpnameModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [settingsModalTab, setSettingsModalTab] = useState<SettingsTab>('profile');
   const [isUniversalImportOpen, setIsUniversalImportOpen] = useState(false);
 
   // File import ref & state
@@ -248,14 +282,18 @@ function DashboardView() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FEFCE8] text-slate-800 flex flex-col font-['Plus_Jakarta_Sans',sans-serif]">
+    <div className={`min-h-screen ${bgClass} flex flex-col font-['Plus_Jakarta_Sans',sans-serif] transition-colors duration-200`}>
       {/* Top Navigation & Mobile Bottom Bar */}
       <Navbar
         onOpenDeviceManager={() => setIsDeviceModalOpen(true)}
         onOpenAuditLog={() => setIsAuditLogOpen(true)}
         onOpenOpname={() => setIsOpnameModalOpen(true)}
         onOpenAddProduct={handleOpenAdd}
-        onOpenSettings={() => setIsSettingsModalOpen(true)}
+        onOpenSettings={(tab?: SettingsTab) => {
+          setSettingsModalTab(tab || 'profile');
+          setIsSettingsModalOpen(true);
+        }}
+        onOpenTheme={openThemeModal}
       />
 
       {/* Main Container (with pb-24 for mobile thumb bar spacing) */}
@@ -700,11 +738,19 @@ function DashboardView() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => setIsSettingsModalOpen(true)}
-              className="text-slate-600 hover:text-amber-800 font-bold px-3 py-1.5 rounded-xl hover:bg-yellow-100 flex items-center gap-1.5 transition-colors cursor-pointer"
+              onClick={openThemeModal}
+              className="text-slate-600 dark:text-slate-300 hover:text-amber-800 dark:hover:text-amber-400 font-bold px-3 py-1.5 rounded-xl hover:bg-yellow-100 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <Sliders className="w-3.5 h-3.5 text-amber-700" />
-              <span>Pengaturan & Profil</span>
+              <Palette className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+              <span>Tema Perangkat</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsSettingsModalOpen(true)}
+              className="text-slate-600 dark:text-slate-300 hover:text-amber-800 dark:hover:text-amber-400 font-bold px-3 py-1.5 rounded-xl hover:bg-yellow-100 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Sliders className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+              <span>Pengaturan &amp; Profil</span>
             </button>
             <button
               type="button"
@@ -770,7 +816,13 @@ function DashboardView() {
 
       <SettingsModal
         isOpen={isSettingsModalOpen}
+        initialTab={settingsModalTab}
         onClose={() => setIsSettingsModalOpen(false)}
+      />
+
+      <ThemeModal
+        isOpen={isThemeModalOpen}
+        onClose={closeThemeModal}
       />
 
       <UniversalImportModal
@@ -793,9 +845,11 @@ function MainDashboard() {
 
 export default function App() {
   return (
-    <InventoryProvider>
-      <MainDashboard />
-    </InventoryProvider>
+    <ThemeProvider>
+      <InventoryProvider>
+        <MainDashboard />
+      </InventoryProvider>
+    </ThemeProvider>
   );
 }
 

@@ -54,6 +54,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   pinRequired: false,
   autoLockMinutes: 0,
   soundEnabled: true,
+  soundVolume: 80,
+  notificationSound: 'cash',
+  restockSound: 'fanfare',
+  warningSound: 'warning',
+  playOnLocalAction: true,
   defaultMinStockAlert: 3,
   enableStockNotifications: true,
   profile: {
@@ -91,16 +96,16 @@ function loadData() {
           saveInventory();
         }
       } else {
-        products = JSON.parse(JSON.stringify(INITIAL_PRODUCTS));
+        products = [];
         saveInventory();
       }
     } else {
-      products = JSON.parse(JSON.stringify(INITIAL_PRODUCTS));
+      products = [];
       saveInventory();
     }
   } catch (err) {
     console.error('Error loading inventory file:', err);
-    products = JSON.parse(JSON.stringify(INITIAL_PRODUCTS));
+    products = [];
     saveInventory();
   }
 
@@ -186,6 +191,22 @@ async function deleteProductFromCloud(productId: string) {
     await deleteDoc(doc(firebaseDb, 'products', productId));
   } catch (err) {
     console.warn('[Server] Error deleting product from Firestore:', err);
+  }
+}
+
+async function clearAllProductsFromCloud() {
+  if (!firebaseDb) return;
+  try {
+    const snap = await getDocs(collection(firebaseDb, 'products'));
+    if (snap.empty) return;
+    const batch = writeBatch(firebaseDb);
+    snap.forEach((d) => {
+      batch.delete(doc(firebaseDb, 'products', d.id));
+    });
+    await batch.commit();
+    console.log('[Server] Successfully cleared all products from Cloud Firestore');
+  } catch (err) {
+    console.warn('[Server] Error clearing products from Cloud Firestore:', err);
   }
 }
 
@@ -290,6 +311,14 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json());
+
+// Prevent stale HTTP cache on standby/wake for all API endpoints
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
 
 // Ultra-fast Health endpoint for zero-latency standby wake checks
 app.get('/api/health', (req, res) => {
@@ -1163,6 +1192,8 @@ app.post('/api/products/clear-all', (req, res) => {
 
   stockLogs.unshift(log);
   saveLogs();
+  clearAllProductsFromCloud().catch(() => {});
+  saveLogToCloud(log).catch(() => {});
 
   broadcast({
     type: 'ALL_PRODUCTS_DELETED',

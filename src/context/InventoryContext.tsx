@@ -1,7 +1,19 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { Product, StockLog, RealtimeMessage, DeviceInfo, StockChangeType, AppSettings, DEFAULT_SETTINGS } from '../types/inventory.ts';
+import { Product, StockLog, RealtimeMessage, DeviceInfo, StockChangeType, AppSettings, DEFAULT_SETTINGS, NotificationSoundType } from '../types/inventory.ts';
 import { INITIAL_PRODUCTS } from '../data/initialData.ts';
-import { playChime, isSoundEnabled, setSoundEnabled } from '../utils/audio.ts';
+import { 
+  playChime, 
+  isSoundEnabled, 
+  setSoundEnabled, 
+  getSoundVolume, 
+  setSoundVolume as applySoundVolume, 
+  setSelectedSound, 
+  setRestockSound, 
+  setWarningSound, 
+  previewSound, 
+  playSound, 
+  initAudioUnlock 
+} from '../utils/audio.ts';
 import { parseDeviceUserAgent } from '../utils/deviceParser.ts';
 import { 
   db, 
@@ -51,6 +63,9 @@ interface InventoryContextType {
   };
   soundOn: boolean;
   toggleSound: () => void;
+  soundVolume: number;
+  setSoundVolume: (volume: number) => void;
+  previewNotificationSound: (type: NotificationSoundType, customVolume?: number) => void;
   updateDeviceProfile: (deviceName: string, operatorName: string) => void;
   // Auth & PIN
   isAuthenticated: boolean;
@@ -316,7 +331,36 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [stockLogs]);
 
   const [soundOn, setSoundOn] = useState(isSoundEnabled);
+  const [soundVolume, setSoundVolumeState] = useState<number>(() => {
+    return settings.soundVolume !== undefined ? settings.soundVolume : getSoundVolume();
+  });
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  // Initialize mobile touch unlock on mount
+  useEffect(() => {
+    initAudioUnlock();
+  }, []);
+
+  // Sync sound settings with audio utilities when settings change
+  useEffect(() => {
+    if (settings.soundEnabled !== undefined) {
+      setSoundOn(settings.soundEnabled);
+      setSoundEnabled(settings.soundEnabled);
+    }
+    if (settings.soundVolume !== undefined) {
+      setSoundVolumeState(settings.soundVolume);
+      applySoundVolume(settings.soundVolume);
+    }
+    if (settings.notificationSound) {
+      setSelectedSound(settings.notificationSound);
+    }
+    if (settings.restockSound) {
+      setRestockSound(settings.restockSound);
+    }
+    if (settings.warningSound) {
+      setWarningSound(settings.warningSound);
+    }
+  }, [settings]);
 
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<any>(null);
@@ -328,9 +372,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const next = !soundOn;
     setSoundOn(next);
     setSoundEnabled(next);
+    updateSettings({ soundEnabled: next }).catch(() => {});
     if (next) {
       playChime('sale');
     }
+  };
+
+  const setSoundVolume = (vol: number) => {
+    const safe = Math.max(0, Math.min(100, Math.round(vol)));
+    setSoundVolumeState(safe);
+    applySoundVolume(safe);
+  };
+
+  const previewNotificationSound = (type: NotificationSoundType, customVolume?: number) => {
+    previewSound(type, customVolume !== undefined ? customVolume : soundVolume);
   };
 
   const updateDeviceProfile = (deviceName: string, operatorName: string) => {
@@ -478,20 +533,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const incoming: Product[] = invData.products;
         setProducts(prev => {
           if (incoming.length === 0) {
-            const wasExplicitlyEmpty = typeof window !== 'undefined' && localStorage.getItem('stz_explicitly_empty') === 'true';
-            if (prev.length > 0 && !wasExplicitlyEmpty) {
-              // Local has products but server returned empty array (e.g. fresh container on Cloud Run cold-start)
-              // Restore backup to server to prevent data loss!
-              fetchWithTimeout('/api/inventory/sync-backup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ clientProducts: prev, force: true }),
-              }, 5000).catch(() => {});
-              return prev;
-            }
             if (typeof window !== 'undefined') {
               try {
                 localStorage.removeItem('stz_saved_products');
+                localStorage.setItem('stz_explicitly_empty', 'true');
               } catch (e) {}
             }
             return [];
@@ -1094,34 +1139,37 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
         reconnectAttemptsRef.current = 0;
 
-        // 1. Instant check from localStorage (0ms latency, never blank)
+        // 1. Instant check from localStorage only if not intentionally empty (0ms latency)
         if (typeof window !== 'undefined') {
           try {
-            const cachedProd = localStorage.getItem('stz_saved_products');
-            if (cachedProd) {
-              const parsed = JSON.parse(cachedProd);
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                setProducts(prev => (prev.length === 0 ? parsed : prev));
+            const isExplicitlyEmpty = localStorage.getItem('stz_explicitly_empty') === 'true';
+            if (!isExplicitlyEmpty) {
+              const cachedProd = localStorage.getItem('stz_saved_products');
+              if (cachedProd) {
+                const parsed = JSON.parse(cachedProd);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  setProducts(prev => (prev.length === 0 ? parsed : prev));
+                }
               }
             }
           } catch {}
         }
 
-        // 2. Ultra-fast ping to wake server from idle/standby
-        fetchWithTimeout('/api/health', {}, 3000).catch(() => {});
+        // 2. Ultra-fast ping to wake server from idle/standby immediately
+        fetchWithTimeout('/api/health', {}, 2500).then(() => {
+          // 3. Flush any pending offline mutations right after health confirmation
+          processPendingMutationsQueue().catch(() => {});
+        }).catch(() => {});
 
-        // 3. Flush any pending offline mutations
-        processPendingMutationsQueue().catch(() => {});
-
-        // 4. Silent background refresh (non-blocking)
+        // 4. Silent non-blocking background refresh to fetch latest state
         refreshData();
 
         const now = Date.now();
-        // If socket is not OPEN or was sleeping for > 10s during standby, reconnect silently
+        // If socket is not OPEN or was sleeping for > 8s during standby, reconnect cleanly
         if (
           !socketRef.current ||
           socketRef.current.readyState !== WebSocket.OPEN ||
-          now - lastActivityRef.current > 10000
+          now - lastActivityRef.current > 8000
         ) {
           connectWebSocket();
         } else {
@@ -1540,6 +1588,19 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       // 4. Direct Cloud Firestore sync
       syncProductToFirestore(clonedProduct).catch((err) => console.warn('[Firestore] Product sync notice:', err));
       saveLogToFirestore(newLog).catch((err) => console.warn('[Firestore] Log sync notice:', err));
+
+      // 4b. Local audio feedback for cashier
+      if (settings.playOnLocalAction !== false) {
+        if (numDelta < 0) {
+          playSound(settings.notificationSound || 'cash', settings.soundVolume);
+        } else if (numDelta > 0) {
+          playSound(settings.restockSound || 'fanfare', settings.soundVolume);
+        } else if (changeType === 'damage') {
+          playSound(settings.warningSound || 'warning', settings.soundVolume);
+        } else {
+          playSound(settings.notificationSound || 'chime', settings.soundVolume);
+        }
+      }
     }
 
     // 5. Send to Server with fallback queue
@@ -1684,6 +1745,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       });
 
       batchSyncProductsToFirestore(affectedProducts, createdLogs).catch(() => {});
+
+      // Audio feedback for cashier batch action
+      if (settings.playOnLocalAction !== false) {
+        playSound(settings.restockSound || 'fanfare', settings.soundVolume);
+      }
     }
 
     // 2. Send to Server with queue fallback
@@ -2235,6 +2301,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         currentDevice,
         soundOn,
         toggleSound,
+        soundVolume,
+        setSoundVolume,
+        previewNotificationSound,
         updateDeviceProfile,
         isAuthenticated,
         isLocked,

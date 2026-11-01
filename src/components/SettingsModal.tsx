@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useInventory } from '../context/InventoryContext.tsx';
-import { StoreProfile, AppSettings } from '../types/inventory.ts';
+import { StoreProfile, AppSettings, NotificationSoundType } from '../types/inventory.ts';
+import { NOTIFICATION_SOUNDS, previewSound } from '../utils/audio.ts';
 import { exportInventoryToCSV } from '../utils/csvExport.ts';
 import { 
   X, 
@@ -21,13 +22,26 @@ import {
   Sparkles,
   Lock,
   PackageX,
-  CalendarX
+  CalendarX,
+  Palette,
+  Sun,
+  Moon,
+  Laptop,
+  Check,
+  Play,
+  Music,
+  Bell,
+  BellRing,
+  SlidersHorizontal
 } from 'lucide-react';
+import { useTheme, THEME_PALETTES, ThemeMode, ThemeColor } from '../context/ThemeContext.tsx';
+
+export type SettingsTab = 'profile' | 'security' | 'sound' | 'preferences' | 'theme' | 'danger';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: 'profile' | 'security' | 'preferences' | 'danger';
+  initialTab?: SettingsTab;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
@@ -50,7 +64,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     lockApp
   } = useInventory();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'preferences' | 'danger'>(initialTab);
+  const {
+    themeMode,
+    themeColor,
+    effectiveMode,
+    devicePrefersDark,
+    palette,
+    setThemeMode,
+    setThemeColor,
+  } = useTheme();
+
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const wasOpenRef = React.useRef(false);
 
   // Profile Form state
@@ -77,6 +101,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // Preferences Form state
   const [soundEnabled, setSoundEnabled] = useState(settings.soundEnabled);
+  const [soundVolume, setSoundVolume] = useState<number>(settings.soundVolume !== undefined ? settings.soundVolume : 80);
+  const [notificationSound, setNotificationSound] = useState<NotificationSoundType>(settings.notificationSound || 'cash');
+  const [restockSound, setRestockSound] = useState<NotificationSoundType>(settings.restockSound || 'fanfare');
+  const [warningSound, setWarningSound] = useState<NotificationSoundType>(settings.warningSound || 'warning');
+  const [playOnLocalAction, setPlayOnLocalAction] = useState<boolean>(settings.playOnLocalAction !== false);
+  const [playingPreview, setPlayingPreview] = useState<string | null>(null);
+  const [soundSaveSuccessMsg, setSoundSaveSuccessMsg] = useState(false);
+  const [isSavingSound, setIsSavingSound] = useState(false);
+
   const [defaultMinStock, setDefaultMinStock] = useState<number>(settings.defaultMinStockAlert || 3);
   const [enableStockNotifications, setEnableStockNotifications] = useState(settings.enableStockNotifications);
 
@@ -106,6 +139,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const [saveSuccessMsg, setSaveSuccessMsg] = useState(false);
 
+  // Sound Preview Player
+  const handlePreview = (tone: NotificationSoundType) => {
+    setPlayingPreview(tone);
+    previewSound(tone, soundVolume);
+    setTimeout(() => {
+      setPlayingPreview((prev) => (prev === tone ? null : prev));
+    }, 600);
+  };
+
+  // Sound Save Handler
+  const handleSaveSoundSettings = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsSavingSound(true);
+    const ok = await updateSettings({
+      soundEnabled,
+      soundVolume,
+      notificationSound,
+      restockSound,
+      warningSound,
+      playOnLocalAction,
+      enableStockNotifications,
+    });
+    setIsSavingSound(false);
+    if (ok) {
+      setSoundSaveSuccessMsg(true);
+      previewSound(notificationSound, soundVolume);
+      setTimeout(() => setSoundSaveSuccessMsg(false), 3500);
+    }
+  };
+
   // Lock body scroll and sync state when modal is opened (only on initial open to prevent wiping typed inputs)
   useEffect(() => {
     if (isOpen) {
@@ -124,6 +187,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         });
         setPinRequired(settings.pinRequired);
         setSoundEnabled(settings.soundEnabled);
+        setSoundVolume(settings.soundVolume !== undefined ? settings.soundVolume : 80);
+        setNotificationSound(settings.notificationSound || 'cash');
+        setRestockSound(settings.restockSound || 'fanfare');
+        setWarningSound(settings.warningSound || 'warning');
+        setPlayOnLocalAction(settings.playOnLocalAction !== false);
         setDefaultMinStock(settings.defaultMinStockAlert || 3);
         setEnableStockNotifications(settings.enableStockNotifications);
         setDeviceName(currentDevice.deviceName);
@@ -131,6 +199,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setProfileMsg(null);
         setPinChangeMsg(null);
         setSaveSuccessMsg(false);
+        setSoundSaveSuccessMsg(false);
       }
       const originalStyle = window.getComputedStyle(document.body).overflow;
       document.body.style.overflow = 'hidden';
@@ -211,6 +280,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     e.preventDefault();
     const ok = await updateSettings({
       soundEnabled,
+      soundVolume,
+      notificationSound,
+      restockSound,
+      warningSound,
+      playOnLocalAction,
       defaultMinStockAlert: Number(defaultMinStock) || 3,
       enableStockNotifications,
     });
@@ -381,6 +455,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('sound')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl whitespace-nowrap transition-all cursor-pointer ${
+              activeTab === 'sound'
+                ? 'bg-white text-slate-900 shadow-sm border border-yellow-200'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+            }`}
+          >
+            <Volume2 className="w-4 h-4 text-emerald-600" />
+            <span>Suara &amp; Nada Notifikasi</span>
+            {soundEnabled && (
+              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full font-bold">
+                Aktif
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => setActiveTab('preferences')}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl whitespace-nowrap transition-all ${
               activeTab === 'preferences'
@@ -390,6 +481,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           >
             <Sliders className="w-4 h-4 text-indigo-600" />
             <span>Preferensi Sistem</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('theme')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl whitespace-nowrap transition-all ${
+              activeTab === 'theme'
+                ? 'bg-white text-slate-900 shadow-sm border border-yellow-200'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+            }`}
+          >
+            <Palette className="w-4 h-4 text-amber-600" />
+            <span>Tema &amp; Warna Perangkat</span>
           </button>
 
           <button
@@ -674,35 +777,429 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
+          {/* TAB SUARA & NADA NOTIFIKASI */}
+          {activeTab === 'sound' && (
+            <form onSubmit={handleSaveSoundSettings} className="space-y-5 animate-in fade-in duration-150">
+              {soundSaveSuccessMsg && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-950 text-xs font-bold rounded-2xl flex items-center gap-2.5 shadow-xs animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Pengaturan suara berhasil disimpan dan disinkronkan ke seluruh sistem!</span>
+                </div>
+              )}
+
+              {/* Header Box */}
+              <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200/90 flex items-start gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-800 flex items-center justify-center shrink-0 border border-amber-300">
+                  <Volume2 className="w-5 h-5" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-black text-slate-900">
+                      Pengaturan Suara Notifikasi & Kasir
+                    </h4>
+                    <span className="text-[10px] font-extrabold bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full">
+                      8 Nada Tersedia
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    Sesuaikan nada dering audio notifikasi toko Anda. Dihasilkan langsung secara sintetis melalui Web Audio API, tanpa kuota download MP3, tanpa delay, dan tetap berbunyi saat offline maupun di HP kasir.
+                  </p>
+                </div>
+              </div>
+
+              {/* Saklar Utama: Suara Aktif / Senyap (Mute) & Volume Slider */}
+              <div className="border border-slate-200 rounded-2xl p-4 bg-white shadow-2xs space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${
+                      soundEnabled ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-400 border border-slate-200'
+                    }`}>
+                      {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                    </div>
+                    <div>
+                      <div className="text-xs font-black text-slate-900">
+                        Master Suara Notifikasi
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        {soundEnabled ? 'Bunyi notifikasi aktif saat transaksi, restock, & peringatan' : 'Sistem dalam mode senyap (mute)'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !soundEnabled;
+                      setSoundEnabled(next);
+                      if (next) previewSound(notificationSound, soundVolume);
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-xs active:scale-95 flex items-center gap-1.5 ${
+                      soundEnabled
+                        ? 'bg-emerald-500 hover:bg-emerald-600 text-slate-950 border border-emerald-400 ring-2 ring-emerald-300/40'
+                        : 'bg-slate-200 hover:bg-slate-300 text-slate-700 border border-slate-300'
+                    }`}
+                  >
+                    {soundEnabled ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                        <span>Suara Aktif</span>
+                      </>
+                    ) : (
+                      <>
+                        <VolumeX className="w-3.5 h-3.5" />
+                        <span>Senyap (Mute)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Slider Volume */}
+                {soundEnabled && (
+                  <div className="pt-3 border-t border-slate-100 space-y-2.5 animate-in fade-in">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                        <SlidersHorizontal className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Kekuatan Volume Suara:</span>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300">
+                          {soundVolume}%
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handlePreview(notificationSound)}
+                          className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-1 transition-all shadow-xs cursor-pointer active:scale-95"
+                          title="Putar nada uji coba pada volume saat ini"
+                        >
+                          <Play className="w-3 h-3 fill-white" />
+                          <span>Uji Volume</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <VolumeX className="w-4 h-4 text-slate-400 shrink-0" />
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="5"
+                        value={soundVolume}
+                        onChange={(e) => setSoundVolume(Number(e.target.value))}
+                        className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                      />
+                      <Volume2 className="w-4 h-4 text-amber-600 shrink-0" />
+                    </div>
+
+                    {/* Preset Buttons */}
+                    <div className="flex items-center gap-1.5 pt-1">
+                      <span className="text-[10px] font-bold text-slate-500 mr-1">Pilihan Cepat:</span>
+                      {[
+                        { label: '25% Lembut', val: 25 },
+                        { label: '50% Sedang', val: 50 },
+                        { label: '80% Standar', val: 80 },
+                        { label: '100% Maksimal', val: 100 },
+                      ].map((p) => (
+                        <button
+                          key={p.val}
+                          type="button"
+                          onClick={() => {
+                            setSoundVolume(p.val);
+                            previewSound(notificationSound, p.val);
+                          }}
+                          className={`px-2 py-0.5 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
+                            soundVolume === p.val
+                              ? 'bg-amber-400 text-slate-950 border-amber-500 shadow-2xs font-black'
+                              : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Koleksi 8 Pilihan Nada Notifikasi Utama */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                      <Music className="w-4 h-4 text-amber-600" />
+                      <span>Koleksi Nada Notifikasi Utama:</span>
+                    </label>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Pilih nada favorit Anda dan klik tombol <strong>Dengarkan</strong> untuk preview bunyi secara langsung.
+                    </p>
+                  </div>
+                  <span className="text-[11px] font-black text-amber-800 bg-amber-50 px-2.5 py-1 rounded-xl border border-amber-200">
+                    Dipilih: {NOTIFICATION_SOUNDS.find((s) => s.id === notificationSound)?.name.split('(')[0].trim()}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {NOTIFICATION_SOUNDS.map((item) => {
+                    const isSelected = notificationSound === item.id;
+                    const isPlaying = playingPreview === item.id;
+
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={() => {
+                          setNotificationSound(item.id);
+                          handlePreview(item.id);
+                        }}
+                        className={`p-3.5 rounded-2xl border transition-all cursor-pointer relative flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-amber-50/80 border-amber-500 ring-2 ring-amber-400/50 shadow-xs'
+                            : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                                isSelected ? 'bg-amber-400 text-slate-950 font-black' : 'bg-slate-100 text-slate-600'
+                              }`}>
+                                {isSelected ? <Check className="w-4 h-4 stroke-[3]" /> : <Music className="w-3.5 h-3.5" />}
+                              </div>
+                              <span className="text-xs font-black text-slate-900 truncate">
+                                {item.name}
+                              </span>
+                            </div>
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full shrink-0 ${
+                              isSelected ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              {item.badge}
+                            </span>
+                          </div>
+
+                          <p className="text-[11px] text-slate-600 leading-snug line-clamp-2">
+                            {item.description}
+                          </p>
+                        </div>
+
+                        <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between">
+                          <span className="text-[10px] font-semibold text-slate-400">
+                            {isSelected ? '✓ Terpilih sebagai nada aktif' : 'Klik kartu untuk memilih'}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePreview(item.id);
+                            }}
+                            className={`px-3 py-1 rounded-xl text-[11px] font-extrabold flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95 ${
+                              isPlaying
+                                ? 'bg-amber-500 text-slate-950 scale-105'
+                                : 'bg-slate-900 hover:bg-slate-800 text-white'
+                            }`}
+                          >
+                            <Play className={`w-3 h-3 ${isPlaying ? 'fill-slate-950 animate-bounce' : 'fill-white'}`} />
+                            <span>{isPlaying ? 'Memutar...' : 'Dengarkan'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Setelan Nada Khusus Berdasarkan Jenis Peristiwa */}
+              <div className="border border-slate-200 rounded-2xl p-4 bg-white shadow-2xs space-y-3.5">
+                <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Kustomisasi Nada Khusus Peristiwa:</span>
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Nada Restock */}
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/90 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-black text-slate-700">
+                        Nada Restock / Barang Masuk:
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handlePreview(restockSound)}
+                        className="text-[10px] font-bold text-amber-700 hover:text-amber-900 flex items-center gap-1"
+                      >
+                        <Play className="w-2.5 h-2.5 fill-current" />
+                        <span>Tes</span>
+                      </button>
+                    </div>
+                    <select
+                      value={restockSound}
+                      onChange={(e) => {
+                        const val = e.target.value as NotificationSoundType;
+                        setRestockSound(val);
+                        handlePreview(val);
+                      }}
+                      className="w-full text-xs font-semibold px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    >
+                      {NOTIFICATION_SOUNDS.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.badge})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Nada Peringatan Stok */}
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/90 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-black text-slate-700">
+                        Nada Peringatan Stok Menipis / Habis:
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handlePreview(warningSound)}
+                        className="text-[10px] font-bold text-rose-700 hover:text-rose-900 flex items-center gap-1"
+                      >
+                        <Play className="w-2.5 h-2.5 fill-current" />
+                        <span>Tes</span>
+                      </button>
+                    </div>
+                    <select
+                      value={warningSound}
+                      onChange={(e) => {
+                        const val = e.target.value as NotificationSoundType;
+                        setWarningSound(val);
+                        handlePreview(val);
+                      }}
+                      className="w-full text-xs font-semibold px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-400"
+                    >
+                      {NOTIFICATION_SOUNDS.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.badge})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Opsi Umpan Balik Lokal */}
+                <div className="pt-2 border-t border-slate-100 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={playOnLocalAction}
+                      onChange={(e) => setPlayOnLocalAction(e.target.checked)}
+                      className="w-4 h-4 text-amber-500 rounded focus:ring-amber-400"
+                    />
+                    <span className="text-xs font-bold text-slate-800">
+                      Bunyikan suara saat kasir melakukan transaksi/update di perangkat ini
+                    </span>
+                  </label>
+                  <p className="text-[11px] text-slate-500 pl-6">
+                    Memberikan umpan balik audio langsung kepada staf kasir bahwa input stok telah sukses tersimpan.
+                  </p>
+
+                  <label className="flex items-center gap-2 cursor-pointer pt-1">
+                    <input
+                      type="checkbox"
+                      checked={enableStockNotifications}
+                      onChange={(e) => setEnableStockNotifications(e.target.checked)}
+                      className="w-4 h-4 text-amber-500 rounded focus:ring-amber-400"
+                    />
+                    <span className="text-xs font-bold text-slate-800">
+                      Tampilkan kartu notifikasi mengambang (toast) saat ada aktivitas stok
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Tombol Aksi Simpan Suara */}
+              <div className="pt-2 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSoundEnabled(true);
+                    setSoundVolume(80);
+                    setNotificationSound('cash');
+                    setRestockSound('fanfare');
+                    setWarningSound('warning');
+                    setPlayOnLocalAction(true);
+                    previewSound('cash', 80);
+                  }}
+                  className="text-xs font-bold text-slate-500 hover:text-slate-800 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Kembalikan Setelan Standar</span>
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isSavingSound}
+                  className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs font-black shadow-md shadow-amber-500/20 flex items-center gap-2 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isSavingSound ? 'Menyimpan...' : 'Simpan Pengaturan Suara'}</span>
+                </button>
+              </div>
+            </form>
+          )}
+
           {/* TAB 3: PREFERENSI SISTEM */}
           {activeTab === 'preferences' && (
-            <form onSubmit={handleSavePreferences} className="space-y-5">
-              <div className="border border-slate-200 rounded-2xl p-4 bg-white space-y-4">
-                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                  Notifikasi & Suara
+            <form onSubmit={handleSavePreferences} className="space-y-5 animate-in fade-in duration-150">
+              {/* Card Buka Pengaturan Suara */}
+              <div className="p-4 bg-amber-50/80 border border-amber-200/90 rounded-2xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-400/20 border border-amber-300 text-amber-800 flex items-center justify-center shrink-0">
+                    <Volume2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-900">
+                      Pengaturan Suara &amp; Nada Notifikasi
+                    </h4>
+                    <p className="text-[11px] text-slate-600">
+                      {soundEnabled ? `Suara Aktif (${soundVolume}%) • Nada: ${NOTIFICATION_SOUNDS.find((s) => s.id === notificationSound)?.name.split('(')[0]}` : 'Suara Senyap (Mute)'}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('sound')}
+                  className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs font-black transition-all shadow-2xs shrink-0 cursor-pointer active:scale-95"
+                >
+                  Buka Pengaturan Suara ➜
+                </button>
+              </div>
+
+              {/* Setelan Batas Minimum Stok */}
+              <div className="border border-slate-200 rounded-2xl p-4 bg-white space-y-4 shadow-2xs">
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  <span>Batas Minimum Alarm Stok Menipis</span>
                 </h4>
 
                 <div className="flex items-center justify-between py-2 border-b border-slate-100">
-                  <div>
-                    <div className="text-xs font-bold text-slate-900">Suara Lonceng Notifikasi</div>
+                  <div className="max-w-md">
+                    <div className="text-xs font-bold text-slate-900">Ambang Batas Stok Menipis Default</div>
                     <div className="text-[11px] text-slate-500">
-                      Memutar nada chime saat terjadi penjualan atau restock dari perangkat lain
+                      Sistem akan membunyikan alarm peringatan dan menampilkan kartu kuning ketika stok varian barang tersisa sama dengan atau kurang dari angka ini.
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setSoundEnabled(!soundEnabled)}
-                    className={`p-2 rounded-xl border text-xs font-bold transition-all ${
-                      soundEnabled ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-slate-100 border-slate-200 text-slate-500'
-                    }`}
-                  >
-                    {soundEnabled ? 'Suara Aktif 🔔' : 'Mute Senyap 🔕'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={defaultMinStock}
+                      onChange={(e) => setDefaultMinStock(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-16 px-2.5 py-1.5 text-xs font-bold text-center border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    />
+                    <span className="text-xs font-bold text-slate-600">pcs</span>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between py-2">
                   <div>
-                    <div className="text-xs font-bold text-slate-900">Notifikasi Toast Mengambang</div>
+                    <div className="text-xs font-bold text-slate-900">Kartu Notifikasi Toast Mengambang</div>
                     <div className="text-[11px] text-slate-500">
                       Menampilkan kartu notifikasi mengambang saat ada update data stok real-time
                     </div>
@@ -711,7 +1208,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     type="checkbox"
                     checked={enableStockNotifications}
                     onChange={(e) => setEnableStockNotifications(e.target.checked)}
-                    className="w-4 h-4 text-rose-600 rounded focus:ring-rose-500"
+                    className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500"
                   />
                 </div>
               </div>
@@ -719,13 +1216,179 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="flex justify-end">
                 <button
                   type="submit"
-                  className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-2"
+                  className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-2 cursor-pointer active:scale-95"
                 >
                   <Save className="w-4 h-4" />
                   <span>Simpan Preferensi</span>
                 </button>
               </div>
             </form>
+          )}
+
+          {/* TAB TEMA & WARNA PERANGKAT */}
+          {activeTab === 'theme' && (
+            <div className="space-y-6 animate-in fade-in duration-150">
+              {/* Header Box */}
+              <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/90 flex items-start gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-700 flex items-center justify-center shrink-0 border border-amber-300">
+                  <Palette className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-slate-900">
+                    Kustomisasi Tema &amp; Tampilan Perangkat
+                  </h4>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    Setelan tema ini berlaku khusus untuk perangkat ini (<strong>{currentDevice.deviceName}</strong>). Perangkat kasir atau HP lain dapat memiliki setelan tema mandiri sesuai preferensi masing-masing.
+                  </p>
+                </div>
+              </div>
+
+              {/* Mode Tampilan Perangkat */}
+              <div className="space-y-3">
+                <label className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <Sun className="w-4 h-4 text-amber-600" />
+                  <span>Mode Tampilan Sistem:</span>
+                </label>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* 1. Otomatis */}
+                  <button
+                    type="button"
+                    onClick={() => setThemeMode('auto')}
+                    className={`p-3.5 rounded-2xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
+                      themeMode === 'auto'
+                        ? 'bg-amber-50/80 border-amber-500 ring-2 ring-amber-400/50 shadow-xs'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center">
+                        <Laptop className="w-4 h-4" />
+                      </div>
+                      {themeMode === 'auto' && (
+                        <div className="w-5 h-5 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center">
+                          <Check className="w-3 h-3 stroke-[3]" />
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <div className="text-xs font-black text-slate-900">Ikuti Perangkat</div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Otomatis menyesuaikan mode gelap/terang HP Anda ({devicePrefersDark ? 'Gelap' : 'Terang'}).
+                      </p>
+                    </div>
+                  </button>
+
+                  {/* 2. Terang */}
+                  <button
+                    type="button"
+                    onClick={() => setThemeMode('light')}
+                    className={`p-3.5 rounded-2xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
+                      themeMode === 'light'
+                        ? 'bg-amber-50/80 border-amber-500 ring-2 ring-amber-400/50 shadow-xs'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="w-8 h-8 rounded-lg bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center">
+                        <Sun className="w-4 h-4" />
+                      </div>
+                      {themeMode === 'light' && (
+                        <div className="w-5 h-5 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center">
+                          <Check className="w-3 h-3 stroke-[3]" />
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <div className="text-xs font-black text-slate-900">Mode Terang (Light)</div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Tampilan cerah, tajam, dan kontras tinggi di siang hari.
+                      </p>
+                    </div>
+                  </button>
+
+                  {/* 3. Gelap */}
+                  <button
+                    type="button"
+                    onClick={() => setThemeMode('dark')}
+                    className={`p-3.5 rounded-2xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
+                      themeMode === 'dark'
+                        ? 'bg-amber-50/80 border-amber-500 ring-2 ring-amber-400/50 shadow-xs'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 text-purple-300 flex items-center justify-center">
+                        <Moon className="w-4 h-4" />
+                      </div>
+                      {themeMode === 'dark' && (
+                        <div className="w-5 h-5 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center">
+                          <Check className="w-3 h-3 stroke-[3]" />
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <div className="text-xs font-black text-slate-900">Mode Gelap (OLED)</div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Latar gelap nyaman di mata malam hari &amp; hemat baterai HP.
+                      </p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Pilihan Warna Tema Toko */}
+              <div className="space-y-3 pt-3 border-t border-slate-100">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <Palette className="w-4 h-4 text-amber-600" />
+                    <span>Pilihan Warna Aksen Toko:</span>
+                  </label>
+                  <span className="text-xs font-bold text-amber-700">
+                    {palette.name}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {Object.values(THEME_PALETTES).map((p) => {
+                    const isSelected = themeColor === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setThemeColor(p.id)}
+                        className={`p-3 rounded-2xl border text-left transition-all flex items-center gap-3 cursor-pointer ${
+                          isSelected
+                            ? 'bg-amber-50/70 border-amber-500 ring-2 ring-amber-400/50 shadow-xs'
+                            : 'bg-white border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div 
+                          className="w-8 h-8 rounded-xl shrink-0 flex items-center justify-center text-white shadow-xs"
+                          style={{ backgroundColor: p.primaryHex }}
+                        >
+                          {isSelected && <Check className="w-4 h-4 stroke-[3]" />}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-black text-slate-900 truncate">
+                            {p.name.split('(')[0].trim()}
+                          </div>
+                          <div className="text-[10px] text-slate-500 truncate">
+                            {p.badge}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Status Alert */}
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-bold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Pengaturan tema langsung aktif dan tersimpan di memori perangkat ini.</span>
+              </div>
+            </div>
           )}
 
           {/* TAB 4: AKSI KRITIS & PENGELOLAAN DATA */}
