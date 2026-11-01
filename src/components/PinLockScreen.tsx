@@ -99,7 +99,7 @@ export const PinLockScreen: React.FC = () => {
   }, [pin, isChecking, targetPinLength]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-gradient-to-br from-yellow-950/95 via-slate-950 to-amber-950 text-white select-none overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-gradient-to-br from-yellow-950/95 via-slate-950 to-amber-950 text-white select-none overflow-y-auto safe-area-pt safe-area-pb">
       {/* Background ambient warm yellow glow */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-amber-400/15 rounded-full blur-3xl pointer-events-none" />
 

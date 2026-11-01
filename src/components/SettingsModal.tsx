@@ -38,16 +38,27 @@ import { useTheme, THEME_PALETTES, ThemeMode, ThemeColor } from '../context/Them
 
 export type SettingsTab = 'profile' | 'security' | 'sound' | 'preferences' | 'theme' | 'danger';
 
+const VALID_TABS: readonly SettingsTab[] = ['profile', 'security', 'sound', 'preferences', 'theme', 'danger'] as const;
+
+function sanitizeTab(tab: unknown): SettingsTab {
+  if (typeof tab === 'string' && (VALID_TABS as readonly string[]).includes(tab)) {
+    return tab as SettingsTab;
+  }
+  return 'profile';
+}
+
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialTab?: SettingsTab;
+  onOpenInstallModal?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
   isOpen, 
   onClose,
-  initialTab = 'profile'
+  initialTab = 'profile',
+  onOpenInstallModal
 }) => {
   const { 
     settings, 
@@ -74,7 +85,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setThemeColor,
   } = useTheme();
 
-  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => sanitizeTab(initialTab));
   const wasOpenRef = React.useRef(false);
 
   // Profile Form state
@@ -172,9 +183,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Lock body scroll and sync state when modal is opened (only on initial open to prevent wiping typed inputs)
   useEffect(() => {
     if (isOpen) {
-      if (initialTab) {
-        setActiveTab(initialTab);
-      }
+      setActiveTab(sanitizeTab(initialTab));
       if (!wasOpenRef.current) {
         setProfile({
           storeName: settings.profile?.storeName || '',
@@ -1211,6 +1220,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500"
                   />
                 </div>
+              </div>
+
+              {/* Card Pasang Aplikasi di HP (PWA) */}
+              <div className="p-4 bg-gradient-to-r from-emerald-50 via-teal-50 to-amber-50 border border-emerald-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <Download className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-900 flex items-center gap-2">
+                      <span>Pasang STZStok di HP / Tablet (PWA)</span>
+                      <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-extrabold">Resmi</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-600 mt-0.5">
+                      Install sebagai aplikasi native di layar utama HP (Android &amp; iPhone). Langsung terbuka cepat tanpa perlu membuka browser lagi.
+                    </p>
+                  </div>
+                </div>
+
+                {onOpenInstallModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenInstallModal();
+                    }}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-all active:scale-95 whitespace-nowrap self-start sm:self-auto cursor-pointer"
+                  >
+                    Pasang di HP 📱
+                  </button>
+                )}
               </div>
 
               <div className="flex justify-end">

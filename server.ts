@@ -331,6 +331,28 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Explicit headers for PWA Service Worker & Manifest
+app.get('/sw.js', (req, res) => {
+  const swPath = path.join(__dirname, 'public', 'sw.js');
+  if (fs.existsSync(swPath)) {
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Service-Worker-Allowed', '/');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.sendFile(swPath);
+  }
+  res.status(404).send('Not found');
+});
+
+app.get('/manifest.json', (req, res) => {
+  const manifestPath = path.join(__dirname, 'public', 'manifest.json');
+  if (fs.existsSync(manifestPath)) {
+    res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    return res.sendFile(manifestPath);
+  }
+  res.status(404).send('Not found');
+});
+
 function extractClientIp(req: http.IncomingMessage): string {
   const forwarded = req.headers['x-forwarded-for'];
   let ip = '';

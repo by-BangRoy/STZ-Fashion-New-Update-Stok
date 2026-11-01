@@ -16,6 +16,7 @@ import { ThemeModal } from './components/ThemeModal.tsx';
 import { PinLockScreen } from './components/PinLockScreen.tsx';
 import { RealtimeNotificationToasts } from './components/RealtimeNotificationToasts.tsx';
 import { UniversalImportModal } from './components/UniversalImportModal.tsx';
+import { PWAInstallModal } from './components/PWAInstallModal.tsx';
 import { exportInventoryToCSV, parseInventoryCSV } from './utils/csvExport.ts';
 import { parseUniversalFile } from './utils/fileImport.ts';
 import { 
@@ -143,6 +144,9 @@ function DashboardView() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [settingsModalTab, setSettingsModalTab] = useState<SettingsTab>('profile');
   const [isUniversalImportOpen, setIsUniversalImportOpen] = useState(false);
+
+  // PWA Install Modal (Accessible from Settings)
+  const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
 
   // File import ref & state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -289,33 +293,37 @@ function DashboardView() {
         onOpenAuditLog={() => setIsAuditLogOpen(true)}
         onOpenOpname={() => setIsOpnameModalOpen(true)}
         onOpenAddProduct={handleOpenAdd}
-        onOpenSettings={(tab?: SettingsTab) => {
-          setSettingsModalTab(tab || 'profile');
+        onOpenSettings={(tab?: any) => {
+          const validTabs: SettingsTab[] = ['profile', 'security', 'sound', 'preferences', 'theme', 'danger'];
+          const cleanTab: SettingsTab = typeof tab === 'string' && validTabs.includes(tab as SettingsTab)
+            ? (tab as SettingsTab)
+            : 'profile';
+          setSettingsModalTab(cleanTab);
           setIsSettingsModalOpen(true);
         }}
         onOpenTheme={openThemeModal}
       />
 
-      {/* Main Container (with pb-24 for mobile thumb bar spacing) */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-28 sm:pb-8">
+      {/* Main Container (with safe area bottom padding for mobile gesture bar) */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-3.5 sm:py-6 pb-24 sm:pb-8">
         {/* Boutique Profile Info Sub-banner */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2.5 text-xs bg-white px-3.5 py-2.5 rounded-2xl border border-yellow-200/90 text-slate-600 shadow-sm">
-          <div className="flex items-center gap-2.5">
-            <div className="flex items-center gap-1.5 font-bold text-slate-900">
+        <div className="mb-4 flex flex-col xs:flex-row items-start xs:items-center justify-between gap-2 text-xs bg-white px-3.5 py-2.5 rounded-2xl border border-yellow-200/90 text-slate-600 shadow-sm">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center gap-1.5 font-bold text-slate-900 truncate">
               <Store className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>{settings.profile.storeName || 'STZ Stok'}</span>
+              <span className="truncate">{settings.profile.storeName || 'STZ Stok'}</span>
               {settings.profile.storeBranch && (
-                <span className="text-slate-400 font-normal">({settings.profile.storeBranch})</span>
+                <span className="text-slate-400 font-normal truncate">({settings.profile.storeBranch})</span>
               )}
             </div>
             {settings.profile.tagline ? (
-              <span className="hidden md:inline text-amber-800/70 italic text-[11px]">
+              <span className="hidden md:inline text-amber-800/70 italic text-[11px] truncate">
                 "{settings.profile.tagline}"
               </span>
             ) : null}
           </div>
 
-          <div className="flex items-center gap-2.5 text-[11px] text-slate-500">
+          <div className="flex items-center gap-2 text-[11px] text-slate-500 self-end xs:self-auto shrink-0">
             {settings.profile.phone && (
               <span className="flex items-center gap-1">
                 <Phone className="w-3 h-3 text-emerald-600 shrink-0" />
@@ -329,13 +337,17 @@ function DashboardView() {
               </span>
             )}
             <button
-              onClick={() => setIsSettingsModalOpen(true)}
-              className="text-amber-700 hover:text-amber-900 font-bold ml-1 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-lg border border-amber-200 transition-colors"
+              onClick={() => {
+                setSettingsModalTab('profile');
+                setIsSettingsModalOpen(true);
+              }}
+              className="text-amber-700 hover:text-amber-900 font-bold ml-1 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-lg border border-amber-200 transition-colors cursor-pointer"
             >
               {settings.profile.storeName ? 'Edit Profil' : '+ Atur Profil'}
             </button>
           </div>
         </div>
+
 
         {/* Peringatan Stok Menipis & Habis Banner */}
         {(outOfStockItems.length > 0 || lowStockItems.length > 0) && (
@@ -818,6 +830,7 @@ function DashboardView() {
         isOpen={isSettingsModalOpen}
         initialTab={settingsModalTab}
         onClose={() => setIsSettingsModalOpen(false)}
+        onOpenInstallModal={() => setIsInstallModalOpen(true)}
       />
 
       <ThemeModal
@@ -828,6 +841,11 @@ function DashboardView() {
       <UniversalImportModal
         isOpen={isUniversalImportOpen}
         onClose={() => setIsUniversalImportOpen(false)}
+      />
+
+      <PWAInstallModal
+        isOpen={isInstallModalOpen}
+        onClose={() => setIsInstallModalOpen(false)}
       />
     </div>
   );
