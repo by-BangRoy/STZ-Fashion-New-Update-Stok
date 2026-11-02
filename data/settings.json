@@ -3,15 +3,20 @@
   "pinRequired": false,
   "autoLockMinutes": 0,
   "soundEnabled": true,
+  "soundVolume": 80,
+  "notificationSound": "cash",
+  "restockSound": "fanfare",
+  "warningSound": "warning",
+  "playOnLocalAction": true,
   "defaultMinStockAlert": 3,
   "enableStockNotifications": true,
   "profile": {
-    "tagline": "Rekap Barang Keluar / Masuk",
-    "phone": "",
     "address": "",
-    "storeBranch": "",
-    "storeName": "STZ",
     "ownerName": "",
-    "socialMedia": ""
+    "storeName": "STZ Stok",
+    "storeBranch": "",
+    "tagline": "Rekap Barang Keluar / Masuk",
+    "socialMedia": "",
+    "phone": ""
   }
 }

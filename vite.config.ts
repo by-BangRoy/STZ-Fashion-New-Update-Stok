@@ -11,7 +11,7 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
+        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png', 'screenshot-narrow.png', 'screenshot-wide.png'],
         manifest: {
           id: '/',
           name: 'STZStok - Rekap Barang Keluar / Masuk',
@@ -20,10 +20,12 @@ export default defineConfig(() => {
           theme_color: '#FEFCE8',
           background_color: '#FEFCE8',
           display: 'standalone',
+          display_override: ['standalone', 'minimal-ui', 'window-controls-overlay'],
           orientation: 'portrait-primary',
           start_url: '/',
           scope: '/',
           categories: ['business', 'productivity', 'shopping'],
+          prefer_related_applications: false,
           icons: [
             {
               src: '/pwa-192x192.png',
@@ -42,6 +44,22 @@ export default defineConfig(() => {
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
+            },
+          ],
+          screenshots: [
+            {
+              src: '/screenshot-narrow.png',
+              sizes: '720x1280',
+              type: 'image/png',
+              form_factor: 'narrow',
+              label: 'Tampilan Katalog Stok di Layar Smartphone',
+            },
+            {
+              src: '/screenshot-wide.png',
+              sizes: '1280x720',
+              type: 'image/png',
+              form_factor: 'wide',
+              label: 'Tampilan Dasbor Stok Multi-Perangkat',
             },
           ],
         },

@@ -39,7 +39,6 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({ isOpen, onCl
   // Lock body scroll when modal is open and sync entries
   useEffect(() => {
     if (isOpen) {
-      const originalStyle = window.getComputedStyle(document.body).overflow;
       document.body.style.overflow = 'hidden';
       
       const list: OpnameEntry[] = [];
@@ -59,7 +58,7 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({ isOpen, onCl
       setStatusMsg(null);
 
       return () => {
-        document.body.style.overflow = originalStyle;
+        document.body.style.overflow = '';
       };
     }
   }, [isOpen]);

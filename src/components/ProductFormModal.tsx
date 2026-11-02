@@ -117,10 +117,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   // Lock body scroll on mobile and desktop when modal is open
   useEffect(() => {
     if (isOpen) {
-      const originalStyle = window.getComputedStyle(document.body).overflow;
       document.body.style.overflow = 'hidden';
       return () => {
-        document.body.style.overflow = originalStyle;
+        document.body.style.overflow = '';
       };
     }
   }, [isOpen]);

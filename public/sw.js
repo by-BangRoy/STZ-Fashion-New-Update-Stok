@@ -1,5 +1,5 @@
 // STZStok Service Worker for PWA Offline & Mobile Installation
-const CACHE_NAME = 'stz-stok-v2';
+const CACHE_NAME = 'stz-stok-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -14,9 +14,11 @@ const STATIC_ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('[SW] Cache precache notice:', err);
-      });
+      return Promise.allSettled(
+        STATIC_ASSETS.map((asset) => cache.add(asset).catch((err) => {
+          console.warn('[SW] Could not precache:', asset, err);
+        }))
+      );
     })
   );
   self.skipWaiting();
@@ -68,7 +70,12 @@ self.addEventListener('fetch', (event) => {
             return cachedResponse;
           }
           if (event.request.mode === 'navigate') {
-            return caches.match('/') || caches.match('/index.html');
+            return caches.match('/index.html').then((indexRes) => {
+              if (indexRes) return indexRes;
+              return caches.match('/').then((rootRes) => {
+                return rootRes || new Response('Offline', { status: 503, statusText: 'Offline' });
+              });
+            });
           }
           return new Response('Offline', { status: 503, statusText: 'Offline' });
         });

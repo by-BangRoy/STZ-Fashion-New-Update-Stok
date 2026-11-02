@@ -333,22 +333,26 @@ app.get('/api/health', (req, res) => {
 
 // Explicit headers for PWA Service Worker & Manifest
 app.get('/sw.js', (req, res) => {
-  const swPath = path.join(__dirname, 'public', 'sw.js');
-  if (fs.existsSync(swPath)) {
+  const distSw = path.join(__dirname, 'dist', 'sw.js');
+  const pubSw = path.join(__dirname, 'public', 'sw.js');
+  const targetPath = (process.env.NODE_ENV === 'production' && fs.existsSync(distSw)) ? distSw : (fs.existsSync(pubSw) ? pubSw : distSw);
+  if (fs.existsSync(targetPath)) {
     res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
     res.setHeader('Service-Worker-Allowed', '/');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    return res.sendFile(swPath);
+    return res.sendFile(targetPath);
   }
   res.status(404).send('Not found');
 });
 
-app.get('/manifest.json', (req, res) => {
-  const manifestPath = path.join(__dirname, 'public', 'manifest.json');
-  if (fs.existsSync(manifestPath)) {
+app.get(['/manifest.json', '/manifest.webmanifest'], (req, res) => {
+  const distManifest = path.join(__dirname, 'dist', 'manifest.webmanifest');
+  const pubManifest = path.join(__dirname, 'public', 'manifest.json');
+  const targetPath = fs.existsSync(pubManifest) ? pubManifest : (fs.existsSync(distManifest) ? distManifest : null);
+  if (targetPath) {
     res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    return res.sendFile(manifestPath);
+    return res.sendFile(targetPath);
   }
   res.status(404).send('Not found');
 });

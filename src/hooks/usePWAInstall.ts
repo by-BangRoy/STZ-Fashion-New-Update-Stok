@@ -9,6 +9,11 @@ export interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
 }
 
+export interface PromptInstallResult {
+  status: 'accepted' | 'dismissed' | 'ios' | 'manual' | 'installed';
+  message: string;
+}
+
 export function usePWAInstall() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState<boolean>(false);
@@ -36,7 +41,6 @@ export function usePWAInstall() {
 
     // 3. Capture beforeinstallprompt event for Android & Chromium
     const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
       setDeferredPrompt(e as BeforeInstallPromptEvent);
     };
 
@@ -53,6 +57,49 @@ export function usePWAInstall() {
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, []);
+
+  // Direct 1-click install without tutorials
+  const promptInstall = useCallback(async (): Promise<PromptInstallResult> => {
+    if (isInstalled) {
+      return {
+        status: 'installed',
+        message: '✓ Aplikasi STZStok sudah terpasang di perangkat ini!',
+      };
+    }
+
+    if (deferredPrompt) {
+      try {
+        await deferredPrompt.prompt();
+        const choiceResult = await deferredPrompt.userChoice;
+        if (choiceResult.outcome === 'accepted') {
+          setIsInstalled(true);
+          setDeferredPrompt(null);
+          return {
+            status: 'accepted',
+            message: '✓ Berhasil! Aplikasi STZStok telah ditambahkan ke layar utama.',
+          };
+        }
+        return {
+          status: 'dismissed',
+          message: 'Pemasangan aplikasi dibatalkan.',
+        };
+      } catch (err) {
+        console.warn('[PWA] Prompt error:', err);
+      }
+    }
+
+    if (isIOS) {
+      return {
+        status: 'ios',
+        message: 'Di iPhone: Ketuk tombol Bagikan [ ⎋ ] di bawah Safari, lalu pilih "Tambah ke Layar Utama".',
+      };
+    }
+
+    return {
+      status: 'manual',
+      message: 'Ketuk menu titik tiga (⋮) di browser Anda lalu pilih "Instal Aplikasi" / "Tambahkan ke Layar Utama".',
+    };
+  }, [deferredPrompt, isInstalled, isIOS]);
 
   const install = useCallback(async (): Promise<'accepted' | 'dismissed' | 'unsupported'> => {
     if (!deferredPrompt) {
@@ -79,6 +126,7 @@ export function usePWAInstall() {
     isInstalled,
     isIOS,
     isAndroid,
+    promptInstall,
     install,
     deferredPrompt,
   };

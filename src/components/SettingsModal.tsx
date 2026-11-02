@@ -35,6 +35,7 @@ import {
   SlidersHorizontal
 } from 'lucide-react';
 import { useTheme, THEME_PALETTES, ThemeMode, ThemeColor } from '../context/ThemeContext.tsx';
+import { usePWAInstall } from '../hooks/usePWAInstall.ts';
 
 export type SettingsTab = 'profile' | 'security' | 'sound' | 'preferences' | 'theme' | 'danger';
 
@@ -84,6 +85,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setThemeMode,
     setThemeColor,
   } = useTheme();
+
+  const { promptInstall, isInstalled } = usePWAInstall();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => sanitizeTab(initialTab));
   const wasOpenRef = React.useRef(false);
@@ -210,10 +213,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setSaveSuccessMsg(false);
         setSoundSaveSuccessMsg(false);
       }
-      const originalStyle = window.getComputedStyle(document.body).overflow;
       document.body.style.overflow = 'hidden';
       return () => {
-        document.body.style.overflow = originalStyle;
+        document.body.style.overflow = '';
       };
     }
     wasOpenRef.current = isOpen;
@@ -1239,18 +1241,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 </div>
 
-                {onOpenInstallModal && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const res = await promptInstall();
+                    if (res.status === 'accepted' || res.status === 'installed') {
+                      setActionSuccessNotice(res.message);
+                      setTimeout(() => setActionSuccessNotice(''), 4500);
+                    } else if (onOpenInstallModal) {
                       onOpenInstallModal();
-                    }}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-all active:scale-95 whitespace-nowrap self-start sm:self-auto cursor-pointer"
-                  >
-                    Pasang di HP 📱
-                  </button>
-                )}
+                    }
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-all active:scale-95 whitespace-nowrap self-start sm:self-auto cursor-pointer flex items-center gap-1.5"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>{isInstalled ? 'Sudah Terpasang' : 'Pasang Aplikasi'}</span>
+                </button>
               </div>
 
               <div className="flex justify-end">

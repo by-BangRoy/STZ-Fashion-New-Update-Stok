@@ -311,7 +311,11 @@ function DashboardView() {
           <div className="flex items-center gap-2 min-w-0">
             <div className="flex items-center gap-1.5 font-bold text-slate-900 truncate">
               <Store className="w-4 h-4 text-amber-600 shrink-0" />
-              <span className="truncate">{settings.profile.storeName || 'STZ Stok'}</span>
+              <span className="truncate font-black text-slate-950">
+                {settings.profile.storeName && !settings.profile.storeName.toLowerCase().includes('stok')
+                  ? `${settings.profile.storeName} Stok`
+                  : (settings.profile.storeName || 'STZ Stok')}
+              </span>
               {settings.profile.storeBranch && (
                 <span className="text-slate-400 font-normal truncate">({settings.profile.storeBranch})</span>
               )}
@@ -842,6 +846,8 @@ function DashboardView() {
         isOpen={isUniversalImportOpen}
         onClose={() => setIsUniversalImportOpen(false)}
       />
+
+
 
       <PWAInstallModal
         isOpen={isInstallModalOpen}

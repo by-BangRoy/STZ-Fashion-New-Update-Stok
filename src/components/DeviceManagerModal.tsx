@@ -86,7 +86,6 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       if (initialTab) setActiveTab(initialTab);
-      const originalStyle = window.getComputedStyle(document.body).overflow;
       document.body.style.overflow = 'hidden';
       fetchDevicesList();
 
@@ -96,7 +95,7 @@ export const DeviceManagerModal: React.FC<DeviceManagerModalProps> = ({
       }, 3500);
 
       return () => {
-        document.body.style.overflow = originalStyle;
+        document.body.style.overflow = '';
         clearInterval(interval);
       };
     }
